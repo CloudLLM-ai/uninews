@@ -5,7 +5,7 @@ Uninews is a universal news scraper written in Rust. It downloads a news article
 ## Features
 
 - **Scraping & Cleaning:** Extracts the main content of a news article by targeting the `<article>` tag (or falling back to `<body>`) and removing unwanted elements.
-- **Markdown Conversion:** Uses CloudLLM to convert the cleaned HTML content into nicely formatted Markdown.
+- **Markdown Conversion:** Uses [CloudLLM](https://github.com/CloudLLM-ai/cloudllm/tree/main) to convert the cleaned HTML content into nicely formatted Markdown.
 - **Reusable Library:** The `universal_scrape` function is exposed for easy integration into other Rust projects.
 
 ## Installation
@@ -44,6 +44,19 @@ If you don't have Rust installed, follow these steps:
 ```bash
 make build
 make install
+```
+
+5. **Run it in the command line:**
+```bash
+# make sure to either export the OPEN_AI_SECRET token before running it
+export OPEN_AI_SECRET=sk-xxxxxxxxxxxxxxxxxxxxxxxxxx
+uninews <some post url>
+
+# or you can set it on the same statement and not export it
+OPEN_AI_SECRET=sk-xxxxxxxxxxxxxxxxxxxxxxxxxx uninews <some post url>
+```
+
+```
 uninews --help
 Usage: uninews <URL>
 
