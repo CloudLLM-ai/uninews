@@ -68,7 +68,7 @@ Options:
 -V, --version  Print version
 ```   
 
-6. ** Integrating it with your rust project **
+6. **Integrating it with your rust project**
 ```rust
     using uninews::{universal_scrape, Post};
 
