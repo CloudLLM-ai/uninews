@@ -31,6 +31,10 @@ install:  ## Install the binary to Cargo's global bin directory
 doc:  ## Generate project documentation using cargo doc
 	cargo doc
 
+# Publish to crates.io
+publish: ## Publish the crate to crates.io
+	cargo publish
+
 # Clean build artifacts
 clean:  ## Remove build artifacts using cargo clean
 	cargo clean
