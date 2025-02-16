@@ -2,9 +2,15 @@ use reqwest::Client;
 use scraper::{ElementRef, Html, Selector};
 use serde::Serialize;
 use std::collections::HashSet;
+use std::env;
+
+// CloudLLM imports.
+use cloudllm::client_wrapper::Role;
+use cloudllm::clients::openai::OpenAIClient;
+use cloudllm::LLMSession;
 
 /// Represents a news post.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct Post {
     pub title: String,
     pub content: String,
@@ -80,11 +86,53 @@ fn extract_clean_content(document: &Html, skip_tags: &HashSet<&str>) -> String {
     String::new()
 }
 
+/// Uses CloudLLM to convert the Post's content JSON into Markdown formatted text.
+///
+/// The function sends the entire Post (as JSON) to the LLM, and updates its `content` field
+/// with the returned Markdown output.
+pub async fn convert_content_to_markdown(mut post: Post) -> Result<Post, String> {
+    // Get the secret key from the environment.
+    let secret_key = env::var("OPEN_AI_SECRET")
+        .map_err(|_| "Please set the OPEN_AI_SECRET environment variable.".to_string())?;
+
+    // Instantiate the OpenAI client.
+    let client = OpenAIClient::new(&secret_key, "gpt-4o");
+
+    // Define a system prompt that instructs the LLM on its role.
+    let system_prompt = "You are an expert markdown formatter. Given a JSON object representing a news post, \
+                         extract and output only the text content in Markdown format. Remove all HTML tags and extra markup. \
+                         Do not include any JSON keys or metadata—only the formatted content."
+        .to_string();
+
+    // Create a new LLMSession.
+    let mut session = LLMSession::new(client, system_prompt, 128000);
+
+    // Serialize the entire Post to JSON.
+    let post_json = serde_json::to_string(&post)
+        .map_err(|e| format!("Failed to serialize Post to JSON: {}", e))?;
+    let user_prompt = format!(
+        "Convert the following Post JSON into Markdown formatted text, nothing else:\n\n{}",
+        post_json
+    );
+
+    // Send the prompt to the LLM.
+    match session.send_message(Role::User, user_prompt).await {
+        Ok(response) => {
+            post.content = response.content;
+            Ok(post)
+        }
+        Err(err) => Err(format!("LLM Error: {}", err)),
+    }
+}
+
 /// Scrapes the provided URL and returns a `Post` struct with the extracted data.
 ///
 /// Downloads the HTML, extracts the `<title>`, and then cleans the main content (preferring an
 /// `<article>` element if available) by removing unwanted tags and empty nodes.
 /// Also attempts to extract a featured image from an Open Graph meta tag.
+///
+/// Finally, it uses CloudLLM to convert the scraped content into Markdown,
+/// so that the returned Post already has its `content` field formatted in Markdown.
 pub async fn universal_scrape(url: &str) -> Post {
     let client = Client::new();
     let response = client.get(url).send().await;
@@ -154,10 +202,19 @@ pub async fn universal_scrape(url: &str) -> Post {
         };
     }
 
-    Post {
+    let scraped_post = Post {
         title,
         content,
         featured_image_url,
         error: "".into(),
+    };
+
+    // Convert the scraped content to Markdown via CloudLLM.
+    match convert_content_to_markdown(scraped_post.clone()).await {
+        Ok(markdown_post) => markdown_post,
+        Err(err) => Post {
+            error: err,
+            ..scraped_post
+        },
     }
 }
