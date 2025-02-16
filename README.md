@@ -36,7 +36,7 @@ If you don't have Rust installed, follow these steps:
 
 3. **Clone the Project:**
     ```bash
-    git clone https://github.com/your-username/uninews.git
+    git clone https://github.com/gubatron/uninews.git
     cd uninews
    ```
    
