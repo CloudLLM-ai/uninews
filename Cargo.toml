@@ -3,6 +3,7 @@ name = "uninews"
 version = "0.1.0"
 edition = "2021"
 authors = ["Angel Leon <gubatron@gmail.com>"]
+repository = "git@github.com:gubatron/uninews.git"
 
 [dependencies]
 tokio = { version = "1.29", features = ["full"] }
