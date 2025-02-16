@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["Angel Leon <gubatron@gmail.com>"]
 description = "A universal news scraper for extracting content from various news blogs and newsites."
 license = "MIT"
-repository = "git@github.com:gubatron/uninews.git"
+repository = "https://github.com/gubatron/uninews"
 
 
 [dependencies]
