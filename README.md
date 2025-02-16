@@ -1,6 +1,6 @@
 # Uninews
 
-Uninews is a universal news scraper written in Rust. It downloads a news article from a given URL, cleans the HTML content, and then uses CloudLLM (via OpenAI) to convert the content into Markdown format. The final output is a JSON object with the article's title, the Markdown-formatted content, and a featured image URL.
+Uninews is a universal news scraper written in Rust. It downloads a news article from a given URL, cleans the HTML content, and then uses CloudLLM (via OpenAI) to convert the content into Markdown format. The final output (via api) is a JSON object with the article's title, the Markdown-formatted content, and a featured image URL. When used as a command line tool it will simply output the final markdown with the contents of the news article or blog post.
 
 ## Features
 
@@ -16,15 +16,15 @@ You need to have Rust and Cargo installed on your system.
 If you do have Rust installed, follow these steps:
 
 1. **Install Uninews:**
-   ```bash
-   cargo install uninews
-   ```  
+```bash
+cargo install uninews
+```  
 
-If you don't have Rust installed, follow these steps:
+If you don't have Rust installed, follow these steps to install Rust and build from source:
 
 1. **Install Rust:**
 
-   On Unix/macOS:
+On Unix/macOS:
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
@@ -54,26 +54,29 @@ export OPEN_AI_SECRET=sk-xxxxxxxxxxxxxxxxxxxxxxxxxx
 uninews <some post url>
 
 # or you can set it on the same statement and not export it
-OPEN_AI_SECRET=sk-xxxxxxxxxxxxxxxxxxxxxxxxxx uninews <some post url>
+OPEN_AI_SECRET=sk-xxxxxxxxxxxxxxxxxxxxxxxxxx uninews [-l <some language name>] <some post url>
 ```
 
+**Command line usage**
 ```
-uninews --help
-Usage: uninews <URL>
+A universal news scraper for extracting content from various news blogs and newsites.
+
+Usage: uninews [OPTIONS] <URL>
 
 Arguments:
-<URL>  The URL of the news article to scrape
+  <URL>  The URL of the news article to scrape
 
 Options:
--h, --help     Print help
--V, --version  Print version
+  -l, --language <LANGUAGE>  Optional output language (default: english) [default: english]
+  -h, --help                 Print help
+  -V, --version              Print version
 ```   
 
-6. **Integrating it with your rust project**
+**Integrating it with your rust project**
 
-uninews requires the OPEN_AI_SECRET environment variable to be set, you can set it in your code before calling the `universal_scrape` function.
+**uninews** requires the `OPEN_AI_SECRET` environment variable to be set, you can set it in your code before calling the `universal_scrape` function.
 
-If you've loaded your OPEN_AI_SECRET from a file or some other means, you can set it like this so uninews won't break:
+If you've loaded your `OPEN_AI_SECRET` from a file or some other means, you can set it like this so uninews won't break:
 `std::env::set_var("OPEN_AI_SECRET", my_open_ai_secret);`
 
 
@@ -90,3 +93,7 @@ return;
 // Print the title and Markdown-formatted content.
  println!("{}\n\n{}", post.title, post.content);
 ```
+
+Licensed under the MIT License.
+
+Copyright (c) 2025 Ángel León
