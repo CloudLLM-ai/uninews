@@ -86,11 +86,12 @@ fn extract_clean_content(document: &Html, skip_tags: &HashSet<&str>) -> String {
     String::new()
 }
 
-/// Uses CloudLLM to convert the Post's content JSON into Markdown formatted text.
+/// Uses CloudLLM to convert the Post's content JSON into Markdown formatted text in a given language.
 ///
 /// The function sends the entire Post (as JSON) to the LLM, and updates its `content` field
-/// with the returned Markdown output.
-pub async fn convert_content_to_markdown(mut post: Post) -> Result<Post, String> {
+/// with the returned Markdown output. The LLM is instructed to output the text in the specified language,
+/// and if the language is not supported, to default to English.
+pub async fn convert_content_to_markdown(mut post: Post, language: &str) -> Result<Post, String> {
     // Get the secret key from the environment.
     let secret_key = env::var("OPEN_AI_SECRET")
         .map_err(|_| "Please set the OPEN_AI_SECRET environment variable.".to_string())?;
@@ -98,11 +99,20 @@ pub async fn convert_content_to_markdown(mut post: Post) -> Result<Post, String>
     // Instantiate the OpenAI client.
     let client = OpenAIClient::new(&secret_key, "gpt-4o");
 
+    // Normalize language: if empty, default to "english".
+    let lang = if language.trim().is_empty() {
+        "english"
+    } else {
+        language
+    };
+
     // Define a system prompt that instructs the LLM on its role.
-    let system_prompt = "You are an expert markdown formatter. Given a JSON object representing a news post, \
-                         extract and output only the text content in Markdown format. Remove all HTML tags and extra markup. \
-                         Do not include any JSON keys or metadata—only the formatted content."
-        .to_string();
+    let system_prompt = format!(
+        "You are an expert markdown formatter and translator. Given a JSON object representing a news post, \
+         extract and output only the text content in Markdown format in {}. Remove all HTML tags and extra markup. \
+         Do not include any JSON keys or metadata—only the formatted content. If {} is not supported, default to english.",
+        lang, lang
+    );
 
     // Create a new LLMSession.
     let mut session = LLMSession::new(client, system_prompt, 128000);
@@ -111,8 +121,8 @@ pub async fn convert_content_to_markdown(mut post: Post) -> Result<Post, String>
     let post_json = serde_json::to_string(&post)
         .map_err(|e| format!("Failed to serialize Post to JSON: {}", e))?;
     let user_prompt = format!(
-        "Convert the following Post JSON into Markdown formatted text, nothing else:\n\n{}",
-        post_json
+        "Convert the following Post JSON into Markdown formatted text in {} language, nothing else:\n\n{}",
+        lang, post_json
     );
 
     // Send the prompt to the LLM.
@@ -131,9 +141,9 @@ pub async fn convert_content_to_markdown(mut post: Post) -> Result<Post, String>
 /// `<article>` element if available) by removing unwanted tags and empty nodes.
 /// Also attempts to extract a featured image from an Open Graph meta tag.
 ///
-/// Finally, it uses CloudLLM to convert the scraped content into Markdown,
+/// Finally, it uses CloudLLM to convert the scraped content into Markdown in the specified language,
 /// so that the returned Post already has its `content` field formatted in Markdown.
-pub async fn universal_scrape(url: &str) -> Post {
+pub async fn universal_scrape(url: &str, language: &str) -> Post {
     let client = Client::new();
     let response = client.get(url).send().await;
 
@@ -209,8 +219,8 @@ pub async fn universal_scrape(url: &str) -> Post {
         error: "".into(),
     };
 
-    // Convert the scraped content to Markdown via CloudLLM.
-    match convert_content_to_markdown(scraped_post.clone()).await {
+    // Convert the scraped content to Markdown via CloudLLM using the specified language.
+    match convert_content_to_markdown(scraped_post.clone(), language).await {
         Ok(markdown_post) => markdown_post,
         Err(err) => Post {
             error: err,

@@ -7,6 +7,7 @@ Uninews is a universal news scraper written in Rust. It downloads a news article
 - **Scraping & Cleaning:** Extracts the main content of a news article by targeting the `<article>` tag (or falling back to `<body>`) and removing unwanted elements.
 - **Markdown Conversion:** Uses gpt-4o through the [CloudLLM](https://github.com/CloudLLM-ai/cloudllm/tree/main) rust API to convert the cleaned HTML content into nicely formatted Markdown.
 - **Reusable Library:** The `universal_scrape` function is exposed for easy integration into other Rust projects.
+- **Multilanguage Support:** The `universal_scrape` function accepts an optional language parameter to specify the language of the article to scrape, otherwise it defaults to English.
 
 ## Installation
 
@@ -24,21 +25,21 @@ If you don't have Rust installed, follow these steps:
 1. **Install Rust:**
 
    On Unix/macOS:
-   ```bash
-   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-   ```
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
 
 2. **Verify Installation**
-   ```bash
-   rustc --version
-   cargo --version
-   ```
+```bash
+rustc --version
+cargo --version
+```
 
 3. **Clone the Project:**
-    ```bash
-    git clone https://github.com/gubatron/uninews.git
-    cd uninews
-   ```
+ ```bash
+ git clone https://github.com/gubatron/uninews.git
+ cd uninews
+```
    
 4. **Build & Install the Project:**
 ```bash
@@ -69,20 +70,23 @@ Options:
 ```   
 
 6. **Integrating it with your rust project**
+
+uninews requires the OPEN_AI_SECRET environment variable to be set, you can set it in your code before calling the `universal_scrape` function.
+
+If you've loaded your OPEN_AI_SECRET from a file or some other means, you can set it like this so uninews won't break:
+`std::env::set_var("OPEN_AI_SECRET", my_open_ai_secret);`
+
+
 ```rust
-    using uninews::{universal_scrape, Post};
+using uninews::{universal_scrape, Post};
 
-    // If you have your OPEN_AI_SECRET loaded by some other means
-    // than from ENV, you can set it like this
-    // std::env::set_var("OPEN_AI_SECRET", my_open_ai_secret);
+// Scrape the URL and convert its content to Markdown in the requested language.
+let post = universal_scrape(&args.url, &args.language).await;
+if !post.error.is_empty() {
+eprintln!("Error during scraping: {}", post.error);
+return;
+}
 
-
-    let post = universal_scrape(&args.url).await;
-    if !post.error.is_empty() {
-        eprintln!("Error during scraping: {}", post.error);
-        return;
-    }
-
-    // Print the title and Markdown-formatted content.
-    println!("{}\n\n{}", post.title, post.content);
+// Print the title and Markdown-formatted content.
+ println!("{}\n\n{}", post.title, post.content);
 ```
