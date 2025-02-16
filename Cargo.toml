@@ -1,5 +1,5 @@
 [package]
-name = "universal_scraper"
+name = "uninews"
 version = "0.1.0"
 edition = "2021"
 authors = ["Angel Leon <gubatron@gmail.com>"]
