@@ -86,8 +86,8 @@ using uninews::{universal_scrape, Post};
 // Scrape the URL and convert its content to Markdown in the requested language.
 let post = universal_scrape(&args.url, &args.language).await;
 if !post.error.is_empty() {
-eprintln!("Error during scraping: {}", post.error);
-return;
+    eprintln!("Error during scraping: {}", post.error);
+    return;
 }
 
 // Print the title and Markdown-formatted content.
