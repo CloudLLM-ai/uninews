@@ -91,7 +91,7 @@ if !post.error.is_empty() {
 }
 
 // Print the title and Markdown-formatted content.
- println!("{}\n\n{}", post.title, post.content);
+println!("{}\n\n{}", post.title, post.content);
 ```
 
 Licensed under the MIT License.
