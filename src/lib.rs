@@ -15,6 +15,8 @@ pub struct Post {
     pub title: String,
     pub content: String,
     pub featured_image_url: String,
+    pub publication_date: Option<String>, // Optional, as not all pages may provide it
+    pub author: Option<String>,           // Optional for the same reason
     pub error: String,
 }
 
@@ -152,11 +154,12 @@ pub async fn universal_scrape(url: &str, language: &str) -> Post {
             title: "".into(),
             content: "".into(),
             featured_image_url: "".into(),
+            publication_date: None,
+            author: None,
             error: format!("Failed to fetch URL: {}", err),
         };
     }
     let response = response.unwrap();
-
     let body_text = match response.text().await {
         Ok(text) => text,
         Err(err) => {
@@ -164,16 +167,15 @@ pub async fn universal_scrape(url: &str, language: &str) -> Post {
                 title: "".into(),
                 content: "".into(),
                 featured_image_url: "".into(),
+                publication_date: None,
+                author: None,
                 error: format!("Failed to read response body: {}", err),
             }
         }
     };
 
-    // Parse the HTML document.
     let document = Html::parse_document(&body_text);
 
-    // Build a set of tags to skip.
-    // We skip script, style, navigation, headers, footers, sidebars, forms, etc.
     let skip_tags: HashSet<&str> = [
         "script", "style", "noscript", "iframe", "header", "footer", "nav", "aside", "form",
         "input", "button", "svg", "picture", "source",
@@ -182,7 +184,7 @@ pub async fn universal_scrape(url: &str, language: &str) -> Post {
     .cloned()
     .collect();
 
-    // Extract the title from the <title> tag.
+    // Extract title
     let title_selector = Selector::parse("title").unwrap();
     let title = document
         .select(&title_selector)
@@ -190,10 +192,10 @@ pub async fn universal_scrape(url: &str, language: &str) -> Post {
         .map(|elem| elem.text().collect::<Vec<_>>().join(" ").trim().to_string())
         .unwrap_or_default();
 
-    // Extract and clean the main content.
+    // Extract content
     let content = extract_clean_content(&document, &skip_tags);
 
-    // Attempt to extract a featured image from the og:image meta tag.
+    // Extract featured image
     let meta_selector = Selector::parse(r#"meta[property="og:image"]"#).unwrap();
     let featured_image_url = document
         .select(&meta_selector)
@@ -202,12 +204,29 @@ pub async fn universal_scrape(url: &str, language: &str) -> Post {
         .unwrap_or("")
         .to_string();
 
-    // If no meaningful content is found, set an error.
+    // Extract publication date
+    let date_selector = Selector::parse(r#"meta[property="article:published_time"]"#).unwrap();
+    let publication_date = document
+        .select(&date_selector)
+        .next()
+        .and_then(|meta| meta.value().attr("content"))
+        .map(String::from);
+
+    // Extract author
+    let author_selector = Selector::parse(r#"meta[name="author"]"#).unwrap();
+    let author = document
+        .select(&author_selector)
+        .next()
+        .and_then(|meta| meta.value().attr("content"))
+        .map(String::from);
+
     if content.trim().is_empty() {
         return Post {
             title: "".into(),
             content: "".into(),
             featured_image_url: "".into(),
+            publication_date: None,
+            author: None,
             error: "Could not extract meaningful content from the page.".into(),
         };
     }
@@ -216,10 +235,11 @@ pub async fn universal_scrape(url: &str, language: &str) -> Post {
         title,
         content,
         featured_image_url,
+        publication_date,
+        author,
         error: "".into(),
     };
 
-    // Convert the scraped content to Markdown via CloudLLM using the specified language.
     match convert_content_to_markdown(scraped_post.clone(), language).await {
         Ok(markdown_post) => markdown_post,
         Err(err) => Post {

@@ -1,4 +1,5 @@
 use clap::Parser;
+use serde_json;
 use uninews::universal_scrape;
 
 /// Command line arguments for uninews.
@@ -11,6 +12,10 @@ struct Args {
     /// Optional output language (default: english)
     #[arg(short, long, default_value = "english")]
     language: String,
+
+    /// Output the result as JSON instead of human-readable text
+    #[arg(short = 'j', long = "json", default_value_t = false)]
+    json: bool,
 }
 
 #[tokio::main]
@@ -24,6 +29,14 @@ async fn main() {
         return;
     }
 
-    // Print the title and Markdown-formatted (and translated) content.
-    println!("{}\n\n{}", post.title, post.content);
+    if args.json {
+        // Serialize the Post object to JSON and print it.
+        match serde_json::to_string_pretty(&post) {
+            Ok(json) => println!("{}", json),
+            Err(err) => eprintln!("Error serializing to JSON: {}", err),
+        }
+    } else {
+        // Print the title and Markdown-formatted (and translated) content for human consumption.
+        println!("{}\n\n{}", post.title, post.content);
+    }
 }
