@@ -99,7 +99,7 @@ pub async fn convert_content_to_markdown(mut post: Post, language: &str) -> Resu
         .map_err(|_| "Please set the OPEN_AI_SECRET environment variable.".to_string())?;
 
     // Instantiate the OpenAI client.
-    let client = OpenAIClient::new(&secret_key, "gpt-4o");
+    let client = OpenAIClient::new_with_model_string(&secret_key, "gpt-4o");
 
     // Normalize language: if empty, default to "english".
     let lang = if language.trim().is_empty() {
