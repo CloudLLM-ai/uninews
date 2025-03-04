@@ -68,6 +68,7 @@ Arguments:
 
 Options:
   -l, --language <LANGUAGE>  Optional output language (default: english) [default: english]
+  -j, --json                 Output the result as JSON instead of human-readable text
   -h, --help                 Print help
   -V, --version              Print version
 ```   
