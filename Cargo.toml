@@ -1,11 +1,11 @@
 [package]
 name = "uninews"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 authors = ["Angel Leon <gubatron@gmail.com>"]
 description = "A universal news scraper for extracting content from various news blogs and newsites."
 license = "MIT"
-repository = "https://github.com/gubatron/uninews"
+repository = "https://github.com/CloudLLM-ai/uninews"
 
 
 [dependencies]
