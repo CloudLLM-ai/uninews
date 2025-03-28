@@ -1,4 +1,5 @@
 # Uninews
+![image](https://github.com/user-attachments/assets/43b59fce-3f0c-4fc8-8ae0-4e97eada5a5b)
 
 Uninews is a universal news scraper written in Rust. It downloads a news article from a given URL, cleans the HTML content, and leverages CloudLLM (via OpenAI) to convert the content into Markdown format. With its powerful translation capabilities, Uninews can seamlessly translate articles into multiple languages while preserving formatting, making it ideal for multilingual content processing. The final output (via API) is a JSON object containing the article's title, the Markdown-formatted content (translated if specified), and a featured image URL. When used as a command-line tool, it outputs the final Markdown with the contents of the news article or blog post in the requested language.
 
