@@ -3,7 +3,7 @@ name = "uninews"
 version = "0.1.7"
 edition = "2021"
 authors = ["Angel Leon <gubatron@gmail.com>"]
-description = "A universal news scraper for extracting content from various news blogs and newsites."
+description = "A universal news scraper for extracting content from various news blogs and news sites."
 license = "MIT"
 repository = "https://github.com/CloudLLM-ai/uninews"
 
