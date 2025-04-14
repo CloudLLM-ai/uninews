@@ -29,6 +29,7 @@ async fn main() {
         return;
     }
 
+    // TODO: make the LLM Client an option [--client <openai|grok|gemini|claude>]
     if args.json {
         // Serialize the Post object to JSON and print it.
         match serde_json::to_string_pretty(&post) {

@@ -3,7 +3,7 @@ use scraper::{ElementRef, Html, Selector};
 use serde::Serialize;
 use std::collections::HashSet;
 use std::env;
-
+use std::sync::Arc;
 // CloudLLM imports.
 use cloudllm::client_wrapper::Role;
 use cloudllm::clients::openai::OpenAIClient;
@@ -99,7 +99,7 @@ pub async fn convert_content_to_markdown(mut post: Post, language: &str) -> Resu
         .map_err(|_| "Please set the OPEN_AI_SECRET environment variable.".to_string())?;
 
     // Instantiate the OpenAI client.
-    let client = OpenAIClient::new_with_model_string(&secret_key, "gpt-4o");
+    let client = Arc::new(OpenAIClient::new_with_model_string(&secret_key, "gpt-4o"));
 
     // Normalize language: if empty, default to "english".
     let lang = if language.trim().is_empty() {
