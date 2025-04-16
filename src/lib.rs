@@ -6,7 +6,7 @@ use std::env;
 use std::sync::Arc;
 // CloudLLM imports.
 use cloudllm::client_wrapper::Role;
-use cloudllm::clients::openai::OpenAIClient;
+use cloudllm::clients::openai::{Model, OpenAIClient};
 use cloudllm::LLMSession;
 
 /// Represents a news post.
@@ -93,13 +93,14 @@ fn extract_clean_content(document: &Html, skip_tags: &HashSet<&str>) -> String {
 /// The function sends the entire Post (as JSON) to the LLM, and updates its `content` field
 /// with the returned Markdown output. The LLM is instructed to output the text in the specified language,
 /// and if the language is not supported, to default to English.
-pub async fn convert_content_to_markdown(mut post: Post, language: &str) -> Result<Post, String> {
+pub async fn convert_content_to_markdown(mut post: Post, language: &str, openai_model: Option<Model>,) -> Result<Post, String> {
     // Get the secret key from the environment.
     let secret_key = env::var("OPEN_AI_SECRET")
         .map_err(|_| "Please set the OPEN_AI_SECRET environment variable.".to_string())?;
 
-    // Instantiate the OpenAI client.
-    let client = Arc::new(OpenAIClient::new_with_model_string(&secret_key, "gpt-4o"));
+    // Instantiate the OpenAI client. gpt-4.1-mini is the default model.
+    let model = openai_model.unwrap_or(Model::GPT41Mini);
+    let client = Arc::new(OpenAIClient::new_with_model_enum(&secret_key, model));
 
     // Normalize language: if empty, default to "english".
     let lang = if language.trim().is_empty() {
@@ -145,7 +146,7 @@ pub async fn convert_content_to_markdown(mut post: Post, language: &str) -> Resu
 ///
 /// Finally, it uses CloudLLM to convert the scraped content into Markdown in the specified language,
 /// so that the returned Post already has its `content` field formatted in Markdown.
-pub async fn universal_scrape(url: &str, language: &str) -> Post {
+pub async fn universal_scrape(url: &str, language: &str, openai_model: Option<Model>) -> Post {
     let client = Client::new();
     let response = client.get(url).send().await;
 
@@ -240,7 +241,7 @@ pub async fn universal_scrape(url: &str, language: &str) -> Post {
         error: "".into(),
     };
 
-    match convert_content_to_markdown(scraped_post.clone(), language).await {
+    match convert_content_to_markdown(scraped_post.clone(), language, openai_model).await {
         Ok(markdown_post) => markdown_post,
         Err(err) => Post {
             error: err,
