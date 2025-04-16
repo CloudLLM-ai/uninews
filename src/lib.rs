@@ -93,7 +93,11 @@ fn extract_clean_content(document: &Html, skip_tags: &HashSet<&str>) -> String {
 /// The function sends the entire Post (as JSON) to the LLM, and updates its `content` field
 /// with the returned Markdown output. The LLM is instructed to output the text in the specified language,
 /// and if the language is not supported, to default to English.
-pub async fn convert_content_to_markdown(mut post: Post, language: &str, openai_model: Option<Model>,) -> Result<Post, String> {
+pub async fn convert_content_to_markdown(
+    mut post: Post,
+    language: &str,
+    openai_model: Option<Model>,
+) -> Result<Post, String> {
     // Get the secret key from the environment.
     let secret_key = env::var("OPEN_AI_SECRET")
         .map_err(|_| "Please set the OPEN_AI_SECRET environment variable.".to_string())?;
