@@ -114,7 +114,7 @@ If you've loaded your `OPEN_AI_SECRET` from a file or some other means, you can 
 using uninews::{universal_scrape, Post};
 
 // Scrape the URL and convert its content to Markdown in the requested language.
-let post = universal_scrape(&args.url, &args.language).await;
+let post = universal_scrape(&args.url, &args.language, Some(cloudllm::clients::openai::Model::GPT41Mini)).await;
 if !post.error.is_empty() {
     eprintln!("Error during scraping: {}", post.error);
     return;
