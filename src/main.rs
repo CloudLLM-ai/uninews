@@ -23,7 +23,7 @@ async fn main() {
     let args = Args::parse();
 
     // Scrape the URL and convert its content to Markdown in the requested language.
-    let post = universal_scrape(&args.url, &args.language).await;
+    let post = universal_scrape(&args.url, &args.language, None).await;
     if !post.error.is_empty() {
         eprintln!("Error during scraping: {}", post.error);
         return;
