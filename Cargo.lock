@@ -78,9 +78,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.95"
+version = "1.0.98"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34ac096ce696dc2fcabef30516bb13c0a68a11d30131d3df6f04711467681b04"
+checksum = "e16d2d3311acee920a9eb8d33b8cbc1787ce4a264e85f964c2404b969bdcd487"
 
 [[package]]
 name = "async-trait"
@@ -207,9 +207,9 @@ checksum = "f46ad14479a25103f283c0f10005961cf086d8dc42205bb44c46ac563475dca6"
 
 [[package]]
 name = "cloudllm"
-version = "0.2.4"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f42cdd1bd122d74422aa6d7a6224f22e8d4478edfce5518354f4a3a0aa8b85ea"
+checksum = "3f21da083a6d75491efd90195cdfa6fbec91cc355cd7fa70f624ee17c0942350"
 dependencies = [
  "async-trait",
  "env_logger",
@@ -1007,13 +1007,13 @@ checksum = "945462a4b81e43c4e3ba96bd7b49d834c6f61198356aa858733bc4acf3cbe62e"
 
 [[package]]
 name = "openai-rust2"
-version = "1.5.8"
+version = "1.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7aadbfdcc0ca5af0f145b20cf4ad1d2887d3869966b673070fb57924b9e94153"
+checksum = "83fcf227409acbf1559d686b2665f583919b5f28e4fcfae29c4c6a879629392e"
 dependencies = [
  "anyhow",
+ "base64",
  "bytes",
- "futures-core",
  "futures-util",
  "lazy_static",
  "reqwest",
