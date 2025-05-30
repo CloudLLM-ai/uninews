@@ -133,7 +133,7 @@ pub async fn convert_content_to_markdown(
     );
 
     // Send the prompt to the LLM.
-    match session.send_message(Role::User, user_prompt).await {
+    match session.send_message(Role::User, user_prompt, None).await {
         Ok(response) => {
             post.content = response.content;
             Ok(post)
