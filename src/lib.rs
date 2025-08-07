@@ -103,7 +103,7 @@ pub async fn convert_content_to_markdown(
         .map_err(|_| "Please set the OPEN_AI_SECRET environment variable.".to_string())?;
 
     // Instantiate the OpenAI client. gpt-4.1-mini is the default model.
-    let model = openai_model.unwrap_or(Model::GPT41Mini);
+    let model = openai_model.unwrap_or(Model::GPT5Nano);
     let client = Arc::new(OpenAIClient::new_with_model_enum(&secret_key, model));
 
     // Normalize language: if empty, default to "english".
