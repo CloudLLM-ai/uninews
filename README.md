@@ -47,7 +47,7 @@ If you do have Rust installed, follow these steps:
 1. **Install Uninews:**
 ```bash
 cargo install uninews
-```  
+```
 
 If you don't have Rust installed, follow these steps to install Rust and build from source:
 
@@ -69,7 +69,7 @@ cargo --version
  git clone https://github.com/gubatron/uninews.git
  cd uninews
 ```
-   
+
 4. **Build & Install the Project:**
 ```bash
 make build
@@ -100,7 +100,7 @@ Options:
   -j, --json                 Output the result as JSON instead of human-readable text
   -h, --help                 Print help
   -V, --version              Print version
-```   
+```
 
 **Integrating it with your rust project**
 

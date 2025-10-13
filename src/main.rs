@@ -1,5 +1,4 @@
 use clap::Parser;
-use serde_json;
 use uninews::universal_scrape;
 
 /// Command line arguments for uninews.
