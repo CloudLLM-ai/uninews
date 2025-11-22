@@ -345,7 +345,7 @@ fn extract_clean_content(document: &Html, skip_tags: &HashSet<&str>) -> String {
 ///
 /// # Supported Languages
 ///
-/// Supports any language that OpenAI's GPT models understand, including:
+/// Supports any language that OpenAI's GPT models understand, including
 /// - English, Spanish, French, German, Italian
 /// - Chinese, Japanese, Korean
 /// - Portuguese, Russian, Arabic
@@ -361,8 +361,8 @@ pub async fn convert_content_to_markdown(
     let secret_key = env::var("OPEN_AI_SECRET")
         .map_err(|_| "Please set the OPEN_AI_SECRET environment variable.".to_string())?;
 
-    // Instantiate the OpenAI client. gpt-4.1-mini is the default model.
-    let model = openai_model.unwrap_or(Model::GPT5Nano);
+    // Instantiate the OpenAI client. gpt-4o is default, fastest, and cheapest.
+    let model = openai_model.unwrap_or(Model::GPT4o);
     let client = Arc::new(OpenAIClient::new_with_model_enum(&secret_key, model));
 
     // Normalize language: if empty, default to "english".
