@@ -126,4 +126,4 @@ println!("{}\n\n{}", post.title, post.content);
 
 Licensed under the MIT License.
 
-Copyright (c) 2025 Ángel León
+Copyright (c) 2026 Ángel León

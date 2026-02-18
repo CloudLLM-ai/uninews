@@ -74,7 +74,7 @@
 //!         e if e.contains("Failed to fetch") => println!("Network error"),
 //!         e if e.contains("Could not extract meaningful content") => println!("Page structure not supported"),
 //!         e if e.contains("LLM Error") => println!("AI processing error"),
-//!         _ => println!("Unknown error: {}", e),
+//!         e => println!("Unknown error: {}", e),
 //!     }
 //! }
 //! # }
@@ -392,7 +392,10 @@ pub async fn convert_content_to_markdown(
     );
 
     // Send the prompt to the LLM.
-    match session.send_message(Role::User, user_prompt, None).await {
+    match session
+        .send_message(Role::User, user_prompt, None, None)
+        .await
+    {
         Ok(response) => {
             post.content = response.content.to_string();
             Ok(post)
