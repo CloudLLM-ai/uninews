@@ -565,6 +565,7 @@ pub async fn convert_content_to_markdown(
 pub async fn universal_scrape(url: &str, language: &str, openai_model: Option<Model>) -> Post {
     let client = Client::builder()
         .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .http1_only()
         .build()
         .unwrap_or_default();
     let response = client.get(url).send().await;

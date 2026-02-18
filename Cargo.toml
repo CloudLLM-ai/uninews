@@ -1,6 +1,6 @@
 [package]
 name = "uninews"
-version = "0.3.4"
+version = "0.3.5"
 edition = "2021"
 authors = ["Angel Leon <gubatron@gmail.com>"]
 description = "A universal news scraper for extracting content from various news blogs and news sites."
