@@ -85,6 +85,7 @@ use scraper::{ElementRef, Html, Selector};
 use serde::Serialize;
 use std::collections::HashSet;
 use std::env;
+use std::error::Error as StdError;
 use std::sync::Arc;
 // CloudLLM imports.
 use cloudllm::client_wrapper::Role;
@@ -562,17 +563,26 @@ pub async fn convert_content_to_markdown(
 /// - Paywalled content
 /// - Sites with aggressive anti-scraping measures
 pub async fn universal_scrape(url: &str, language: &str, openai_model: Option<Model>) -> Post {
-    let client = Client::new();
+    let client = Client::builder()
+        .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .build()
+        .unwrap_or_default();
     let response = client.get(url).send().await;
 
     if let Err(err) = response {
+        let mut msg = format!("Failed to fetch URL: {}", err);
+        let mut src: Option<&dyn StdError> = err.source();
+        while let Some(cause) = src {
+            msg.push_str(&format!(" => {}", cause));
+            src = cause.source();
+        }
         return Post {
             title: "".into(),
             content: "".into(),
             featured_image_url: "".into(),
             publication_date: None,
             author: None,
-            error: format!("Failed to fetch URL: {}", err),
+            error: msg,
         };
     }
     let response = response.unwrap();
