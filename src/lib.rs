@@ -391,7 +391,9 @@ async fn scrape_x_url(url: &str, language: &str, openai_model: Option<Model>) ->
                 featured_image_url: String::new(),
                 publication_date: None,
                 author: None,
-                error: "Please set the X_BEARER_TOKEN environment variable to access X.com content.".into(),
+                error:
+                    "Please set the X_BEARER_TOKEN environment variable to access X.com content."
+                        .into(),
             };
         }
     };
@@ -534,11 +536,10 @@ async fn scrape_x_url(url: &str, language: &str, openai_model: Option<Model>) ->
                     // Only include tweets from the same author (i.e. the thread,
                     // not replies from other users). Guard against an empty
                     // author_id (which would match any tweet lacking the field).
-                    let same_author = !author_id.is_empty()
-                        && t.author_id.as_deref() == Some(author_id.as_str());
+                    let same_author =
+                        !author_id.is_empty() && t.author_id.as_deref() == Some(author_id.as_str());
                     if same_author && t.id != root_tweet.id {
-                        thread_tweets
-                            .push((t.created_at.unwrap_or_default(), t.text));
+                        thread_tweets.push((t.created_at.unwrap_or_default(), t.text));
                     }
                 }
             }
@@ -697,10 +698,7 @@ pub async fn convert_content_to_markdown(
     );
 
     // Send the prompt to the LLM.
-    match session
-        .send_message(Role::User, user_prompt, None, None)
-        .await
-    {
+    match session.send_message(Role::User, user_prompt, None).await {
         Ok(response) => {
             post.content = response.content.to_string();
             Ok(post)

@@ -6,6 +6,12 @@
   - Returns a clear error message when `X_BEARER_TOKEN` is not set.
   - Works with both `https://x.com/` and `https://twitter.com/` URLs.
 - Bump quinn-proto from 0.11.13 to 0.11.14 (security update)
+- Update third-party libraries:
+  - tokio 1.49.0 -> 1.50.0
+  - cloudllm 0.10.6 -> 0.14.0
+  - scraper 0.25.0 -> 0.26.0
+  - clap 4.5.49 -> 4.6.0
+- Fix `convert_content_to_markdown` to use the updated `session.send_message` signature, addressing the clippy warning
 
 0.3.6
 - Bump aws-lc-sys to 0.38.0
