@@ -1,0 +1,64 @@
+0.3.7
+- Added X support with X v2 API
+- Bump quinn-proto from 0.11.13 to 0.11.14 (security update)
+
+0.3.6
+- Bump aws-lc-sys to 0.38.0
+- Bump version to 0.3.6
+
+0.3.5
+- Force HTTP/1.1 to fix HTTP/2 stream errors
+
+0.3.4
+- Add browser User-Agent and verbose fetch error chain
+
+0.3.3
+- Update dependencies and fix doctest error
+
+0.3.2
+- Update dependencies and default to GPT-4o
+- Add comprehensive documentation with working examples
+
+0.3.1
+- Now powered by cloudllm 0.6.1
+
+0.3.0
+- Upgrade dependencies and improve Makefile and LLM handling
+
+0.2.3
+- LLM Client now uses OpenAI GPT-5-nano
+
+0.2.2
+- Bump patch versions for security & stability
+
+0.2.1
+- Update cloudllm, reqwest and clap deps to their latest versions
+
+0.2.0
+- Update tokio 1.44.2 -> 1.45.0; clap 4.5.36 -> 4.5.38
+- Add optional parameter support (readme update)
+
+0.1.9
+- Parametrize OpenAI model with default gpt-4.1-mini
+- Bump openssl from 0.10.71 to 0.10.72
+- Update reqwest to 0.12.15 for openssl update
+
+0.1.7
+- Update cloudllm to 0.2.3 compatible version, update deps
+- Bump ring from 0.17.9 to 0.17.14
+
+0.1.6
+- Update dependencies and OpenAI client initialization
+
+0.1.5
+- Add metadata and JSON output support
+
+0.1.4
+- Add multilanguage support and prompt updates
+
+0.1.1
+- Documentation improvements and version bump
+
+0.1.0
+- Integrate CloudLLM conversion for Markdown output
+- Initial implementation of universal web news scraper
