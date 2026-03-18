@@ -82,7 +82,7 @@
 
 use reqwest::Client;
 use scraper::{ElementRef, Html, Selector};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::env;
 use std::error::Error as StdError;
@@ -280,6 +280,310 @@ fn extract_clean_content(document: &Html, skip_tags: &HashSet<&str>) -> String {
         }
     }
     String::new()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// X.com / Twitter support
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A single tweet returned by the Twitter/X API v2.
+#[derive(Deserialize, Debug)]
+struct XTweet {
+    id: String,
+    text: String,
+    created_at: Option<String>,
+    author_id: Option<String>,
+    conversation_id: Option<String>,
+}
+
+/// Author information from the Twitter/X API v2 `includes.users` array.
+#[derive(Deserialize, Debug)]
+struct XUser {
+    name: String,
+    username: String,
+    profile_image_url: Option<String>,
+}
+
+/// The `includes` block that accompanies expanded API responses.
+#[derive(Deserialize, Debug)]
+struct XIncludes {
+    users: Option<Vec<XUser>>,
+}
+
+/// Top-level response for a single-tweet lookup (`GET /2/tweets/:id`).
+#[derive(Deserialize, Debug)]
+struct XTweetResponse {
+    data: Option<XTweet>,
+    includes: Option<XIncludes>,
+    errors: Option<Vec<serde_json::Value>>,
+}
+
+/// Top-level response for a recent-search query (`GET /2/tweets/search/recent`).
+#[derive(Deserialize, Debug)]
+struct XSearchResponse {
+    data: Option<Vec<XTweet>>,
+}
+
+/// Returns `true` when `url` belongs to X.com or Twitter.com.
+///
+/// # Examples
+///
+/// ```
+/// // These are X/Twitter URLs:
+/// //   https://x.com/user/status/1234567890
+/// //   https://twitter.com/user/status/1234567890
+/// ```
+fn is_x_url(url: &str) -> bool {
+    url.starts_with("https://x.com/") || url.starts_with("https://twitter.com/")
+}
+
+/// Extracts the numeric tweet ID from an X.com or Twitter.com status URL.
+///
+/// Supports trailing query-strings and fragments:
+/// - `https://x.com/user/status/1234567890` → `Some("1234567890")`
+/// - `https://twitter.com/user/status/1234567890?s=20` → `Some("1234567890")`
+///
+/// Returns `None` if no numeric ID can be found after `/status/`.
+fn extract_tweet_id(url: &str) -> Option<String> {
+    // Strip query-string and fragment before searching for the ID.
+    let clean = url.split('?').next().unwrap_or(url);
+    let clean = clean.split('#').next().unwrap_or(clean);
+
+    const STATUS: &str = "/status/";
+    if let Some(pos) = clean.find(STATUS) {
+        let after = &clean[pos + STATUS.len()..];
+        let id: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if !id.is_empty() {
+            return Some(id);
+        }
+    }
+    None
+}
+
+/// Fetches a tweet or X thread via the Twitter/X API v2 and returns a [`Post`].
+///
+/// # Authentication
+///
+/// Requires the `X_BEARER_TOKEN` environment variable to be set with an
+/// OAuth 2.0 app-only Bearer Token from the [X Developer Portal](https://developer.twitter.com/).
+///
+/// # Thread handling
+///
+/// When the fetched tweet is the root of a thread (or part of one), the
+/// function also queries the recent-search endpoint to collect all tweets
+/// in the same conversation that were posted by the same author, then
+/// sorts them chronologically so the thread reads naturally.
+///
+/// > **Note:** The recent-search endpoint only covers the last 7 days.
+/// > Tweets older than 7 days are still returned as a single-tweet post.
+///
+/// # Errors
+///
+/// All errors are non-fatal and are returned inside [`Post::error`].
+async fn scrape_x_url(url: &str, language: &str, openai_model: Option<Model>) -> Post {
+    // ── 1. Resolve the Bearer Token ──────────────────────────────────────────
+    let bearer_token = match env::var("X_BEARER_TOKEN") {
+        Ok(t) if !t.trim().is_empty() => t,
+        _ => {
+            return Post {
+                title: String::new(),
+                content: String::new(),
+                featured_image_url: String::new(),
+                publication_date: None,
+                author: None,
+                error: "Please set the X_BEARER_TOKEN environment variable to access X.com content.".into(),
+            };
+        }
+    };
+
+    // ── 2. Extract the tweet ID from the URL ─────────────────────────────────
+    let tweet_id = match extract_tweet_id(url) {
+        Some(id) => id,
+        None => {
+            return Post {
+                title: String::new(),
+                content: String::new(),
+                featured_image_url: String::new(),
+                publication_date: None,
+                author: None,
+                error: format!("Could not extract a tweet ID from the URL: {}", url),
+            };
+        }
+    };
+
+    // ── 3. Build the HTTP client ──────────────────────────────────────────────
+    let client = Client::builder()
+        .user_agent("Mozilla/5.0 (compatible; uninews/1.0)")
+        .build()
+        .unwrap_or_default();
+
+    let auth_header = format!("Bearer {}", bearer_token);
+
+    // ── 4. Fetch the root tweet ───────────────────────────────────────────────
+    let root_tweet_url = format!(
+        "https://api.twitter.com/2/tweets/{}?tweet.fields=created_at,author_id,conversation_id,text&expansions=author_id&user.fields=name,username,profile_image_url",
+        tweet_id
+    );
+    let root_resp = match client
+        .get(&root_tweet_url)
+        .header("Authorization", &auth_header)
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            return Post {
+                title: String::new(),
+                content: String::new(),
+                featured_image_url: String::new(),
+                publication_date: None,
+                author: None,
+                error: format!("Failed to call X API: {}", e),
+            };
+        }
+    };
+
+    let root_data: XTweetResponse = match root_resp.json().await {
+        Ok(d) => d,
+        Err(e) => {
+            return Post {
+                title: String::new(),
+                content: String::new(),
+                featured_image_url: String::new(),
+                publication_date: None,
+                author: None,
+                error: format!("Failed to parse X API response: {}", e),
+            };
+        }
+    };
+
+    // Surface API-level errors (e.g. tweet not found, bad credentials).
+    if let Some(errors) = &root_data.errors {
+        if !errors.is_empty() {
+            let msg = errors
+                .first()
+                .and_then(|e| e.get("detail").or_else(|| e.get("message")))
+                .and_then(|v| v.as_str())
+                .unwrap_or("Unknown X API error");
+            return Post {
+                title: String::new(),
+                content: String::new(),
+                featured_image_url: String::new(),
+                publication_date: None,
+                author: None,
+                error: format!("X API error: {}", msg),
+            };
+        }
+    }
+
+    let root_tweet = match root_data.data {
+        Some(t) => t,
+        None => {
+            return Post {
+                title: String::new(),
+                content: String::new(),
+                featured_image_url: String::new(),
+                publication_date: None,
+                author: None,
+                error: "X API returned no tweet data.".into(),
+            };
+        }
+    };
+
+    // Resolve the author's display name and profile image.
+    let author_info = root_data
+        .includes
+        .as_ref()
+        .and_then(|inc| inc.users.as_ref())
+        .and_then(|users| users.first());
+
+    let author_display = author_info.map(|u| format!("@{} ({})", u.username, u.name));
+    let profile_image = author_info
+        .and_then(|u| u.profile_image_url.clone())
+        .unwrap_or_default();
+
+    let author_id = root_tweet.author_id.clone().unwrap_or_default();
+    let conversation_id = root_tweet
+        .conversation_id
+        .clone()
+        .unwrap_or_else(|| root_tweet.id.clone());
+
+    // ── 5. Collect the full thread ────────────────────────────────────────────
+    // Seed the list with the root tweet.
+    let mut thread_tweets: Vec<(String, String)> = vec![(
+        root_tweet.created_at.clone().unwrap_or_default(),
+        root_tweet.text.clone(),
+    )];
+
+    // Try to fetch the rest of the conversation from the recent-search endpoint.
+    // This only covers the last 7 days; for older tweets we fall back to the
+    // single tweet already captured above.
+    let search_url = format!(
+        "https://api.twitter.com/2/tweets/search/recent?query=conversation_id%3A{}&tweet.fields=created_at,author_id,text&max_results=100",
+        conversation_id
+    );
+    if let Ok(search_resp) = client
+        .get(&search_url)
+        .header("Authorization", &auth_header)
+        .send()
+        .await
+    {
+        if let Ok(search_data) = search_resp.json::<XSearchResponse>().await {
+            if let Some(tweets) = search_data.data {
+                for t in tweets {
+                    // Only include tweets from the same author (i.e. the thread,
+                    // not replies from other users). Guard against an empty
+                    // author_id (which would match any tweet lacking the field).
+                    let same_author = !author_id.is_empty()
+                        && t.author_id.as_deref() == Some(author_id.as_str());
+                    if same_author && t.id != root_tweet.id {
+                        thread_tweets
+                            .push((t.created_at.unwrap_or_default(), t.text));
+                    }
+                }
+            }
+        }
+    }
+
+    // Sort chronologically so the thread reads oldest → newest.
+    thread_tweets.sort_by(|a, b| a.0.cmp(&b.0));
+
+    // ── 6. Assemble the Post ──────────────────────────────────────────────────
+    let title = format!(
+        "{}: {}",
+        author_display.as_deref().unwrap_or("X post"),
+        root_tweet.text.chars().take(80).collect::<String>()
+    );
+
+    let content = thread_tweets
+        .iter()
+        .map(|(ts, text)| {
+            if ts.is_empty() {
+                text.clone()
+            } else {
+                format!("[{}] {}", ts, text)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+
+    let scraped_post = Post {
+        title,
+        content,
+        featured_image_url: profile_image,
+        publication_date: root_tweet.created_at,
+        author: author_display,
+        error: String::new(),
+    };
+
+    // ── 7. AI Markdown conversion & optional translation ──────────────────────
+    match convert_content_to_markdown(scraped_post.clone(), language, openai_model).await {
+        Ok(markdown_post) => markdown_post,
+        Err(err) => Post {
+            error: err,
+            ..scraped_post
+        },
+    }
 }
 
 /// Converts raw HTML content to Markdown using OpenAI's GPT models.
@@ -563,6 +867,11 @@ pub async fn convert_content_to_markdown(
 /// - Paywalled content
 /// - Sites with aggressive anti-scraping measures
 pub async fn universal_scrape(url: &str, language: &str, openai_model: Option<Model>) -> Post {
+    // Delegate to the X.com handler for X / Twitter URLs.
+    if is_x_url(url) {
+        return scrape_x_url(url, language, openai_model).await;
+    }
+
     let client = Client::builder()
         .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         .http1_only()
@@ -673,5 +982,78 @@ pub async fn universal_scrape(url: &str, language: &str, openai_model: Option<Mo
             error: err,
             ..scraped_post
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── is_x_url ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_is_x_url_x_com() {
+        assert!(is_x_url("https://x.com/user/status/123"));
+    }
+
+    #[test]
+    fn test_is_x_url_twitter_com() {
+        assert!(is_x_url("https://twitter.com/user/status/123"));
+    }
+
+    #[test]
+    fn test_is_x_url_non_x() {
+        assert!(!is_x_url("https://example.com/article"));
+        assert!(!is_x_url("https://bbc.com/news/world"));
+        assert!(!is_x_url("http://x.com/user/status/123")); // http, not https
+        assert!(!is_x_url("https://notx.com/user/status/123"));
+        assert!(!is_x_url("https://x.com")); // missing trailing slash and path
+        assert!(!is_x_url("https://twitter.com")); // missing trailing slash and path
+    }
+
+    // ── extract_tweet_id ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_extract_tweet_id_x_com() {
+        assert_eq!(
+            extract_tweet_id("https://x.com/user/status/1234567890"),
+            Some("1234567890".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_tweet_id_twitter_com() {
+        assert_eq!(
+            extract_tweet_id("https://twitter.com/user/status/9876543210"),
+            Some("9876543210".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_tweet_id_with_query_params() {
+        assert_eq!(
+            extract_tweet_id("https://x.com/user/status/111222333?s=20&t=abc"),
+            Some("111222333".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_tweet_id_with_fragment() {
+        assert_eq!(
+            extract_tweet_id("https://x.com/user/status/555666777#anchor"),
+            Some("555666777".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_tweet_id_no_status() {
+        assert_eq!(extract_tweet_id("https://x.com/user"), None);
+        assert_eq!(extract_tweet_id("https://example.com/article"), None);
+    }
+
+    #[test]
+    fn test_extract_tweet_id_empty_status() {
+        // /status/ present but no digits after it
+        assert_eq!(extract_tweet_id("https://x.com/user/status/"), None);
     }
 }
