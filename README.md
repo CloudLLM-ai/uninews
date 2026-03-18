@@ -35,6 +35,7 @@ Options:
 
 - **Scraping & Cleaning:** Extracts the main content of a news article by targeting the `<article>` tag (or falling back to `<body>`) and removing unwanted elements.
 - **Markdown Conversion:** Uses gpt-4o through the [CloudLLM](https://github.com/CloudLLM-ai/cloudllm/tree/main) rust API to convert the cleaned HTML content into nicely formatted Markdown.
+- **X.com / Twitter Support:** Reads individual tweets and full X threads via the X API v2, assembling the thread chronologically before converting it to Markdown.
 - **Reusable Library:** The `universal_scrape` function is exposed for easy integration into other Rust projects.
 - **Multilanguage Support:** The `universal_scrape` function accepts an optional language parameter to specify the language of the article to scrape, otherwise it defaults to English.
 
@@ -85,6 +86,33 @@ uninews <some post url>
 # or you can set it on the same statement and not export it
 OPEN_AI_SECRET=sk-xxxxxxxxxxxxxxxxxxxxxxxxxx uninews [-l <some language name>] <some post url>
 ```
+
+## X.com / Twitter Support
+
+To read tweets and X threads, set the `X_BEARER_TOKEN` environment variable with an
+[OAuth 2.0 app-only Bearer Token](https://developer.twitter.com/en/docs/authentication/oauth-2-0/bearer-tokens)
+from the [X Developer Portal](https://developer.twitter.com/).
+
+```bash
+export X_BEARER_TOKEN=AAAA...your_bearer_token...
+uninews "https://x.com/user/status/1234567890"
+```
+
+### Environment variables for X.com
+
+| Variable | Required | Description |
+|---|---|---|
+| `X_BEARER_TOKEN` | ✅ Yes (for X URLs) | OAuth 2.0 app-only Bearer Token obtained from the X Developer Portal |
+
+When a URL starts with `https://x.com/` or `https://twitter.com/`, uninews will:
+1. Extract the tweet ID from the URL.
+2. Fetch the tweet (and its author info) via the X API v2.
+3. Attempt to retrieve the full thread from the same author using the
+   recent-search endpoint (covers the last 7 days).
+4. Sort all thread tweets chronologically (oldest → newest).
+5. Pass the assembled content through the AI formatter, just like any other URL.
+
+If `X_BEARER_TOKEN` is not set, a clear error message is returned instead of silently failing.
 
 **Command line usage**
 ```
