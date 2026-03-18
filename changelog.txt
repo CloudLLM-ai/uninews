@@ -1,0 +1,17 @@
+## 0.3.7
+
+- **X.com / Twitter Support:** Added support for reading individual tweets and full X threads.
+  - Fetches tweets and author info via the X API v2.
+  - Assembles full threads chronologically (oldest → newest) using the recent-search endpoint (covers last 7 days).
+  - Requires `X_BEARER_TOKEN` environment variable (OAuth 2.0 app-only Bearer Token from the X Developer Portal).
+  - Returns a clear error message when `X_BEARER_TOKEN` is not set.
+  - Works with both `https://x.com/` and `https://twitter.com/` URLs.
+
+## 0.3.6
+
+- Initial public release.
+- Scrapes news articles from any URL, targeting the `<article>` tag (falling back to `<body>`).
+- Converts cleaned HTML content to Markdown using GPT-4o via the CloudLLM Rust API.
+- Supports translation to 100+ languages via the `--language` / `-l` flag.
+- JSON output mode via the `--json` / `-j` flag.
+- Exposes `universal_scrape` as a reusable library function.
