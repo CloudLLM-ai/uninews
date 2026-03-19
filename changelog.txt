@@ -2,9 +2,13 @@
 - Added X.com support with X v2 API
   - Fetches tweets and author info via the X API v2.
   - Assembles full threads chronologically (oldest → newest) using the recent-search endpoint (covers last 7 days).
-  - Uses `X_API_KEY` (Consumer Key) and `X_API_SECRET` (Consumer Secret) to obtain an OAuth 2.0 app-only bearer token automatically.
-  - Follows expanded article links from link-only X posts and scrapes the linked article content directly.
-  - Fetches `x.com/i/article/...` bodies from X's web GraphQL tweet payload when available, with browser fallback still available for guest-wall cases.
+  - Uses `X_API_KEY` (Consumer Key) and `X_API_SECRET` (Consumer Secret) to obtain an OAuth 2.0 app-only bearer token automatically, with compatibility fallback for `DBTC_TWITTER_API_KEY` and `DBTC_TWITTER_API_SECRET`.
+  - Follows expanded article links from link-only X posts and scrapes external linked article content directly.
+  - Reads X Articles from the root tweet `article` payload when X includes `article.plain_text`, `article.title`, and preview metadata in the v2 tweet response.
+  - Falls back to X's web GraphQL tweet payload for `x.com/i/article/...` bodies when the root tweet does not include the full article text.
+  - Keeps a browser fallback path for guest-wall cases where X withholds article content from both the v2 and web GraphQL payloads.
+  - Improves X error reporting and debug output so API failures, guest-token responses, GraphQL payloads, and guest-wall HTML can be inspected directly.
+  - Adds ignored live integration coverage for both X threads and link-only X Article posts under `tests/`.
   - Returns a clear error message when `X_API_KEY` or `X_API_SECRET` is missing.
   - Works with both `https://x.com/` and `https://twitter.com/` URLs.
 - Bump quinn-proto from 0.11.13 to 0.11.14 (security update)
