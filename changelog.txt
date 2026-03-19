@@ -1,9 +1,11 @@
-0.3.7
+0.38.0
 - Added X.com support with X v2 API
   - Fetches tweets and author info via the X API v2.
   - Assembles full threads chronologically (oldest → newest) using the recent-search endpoint (covers last 7 days).
-  - Requires `X_BEARER_TOKEN` environment variable (OAuth 2.0 app-only Bearer Token from the X Developer Portal).
-  - Returns a clear error message when `X_BEARER_TOKEN` is not set.
+  - Uses `X_API_KEY` (Consumer Key) and `X_API_SECRET` (Consumer Secret) to obtain an OAuth 2.0 app-only bearer token automatically.
+  - Follows expanded article links from link-only X posts and scrapes the linked article content directly.
+  - Fetches `x.com/i/article/...` bodies from X's web GraphQL tweet payload when available, with browser fallback still available for guest-wall cases.
+  - Returns a clear error message when `X_API_KEY` or `X_API_SECRET` is missing.
   - Works with both `https://x.com/` and `https://twitter.com/` URLs.
 - Bump quinn-proto from 0.11.13 to 0.11.14 (security update)
 - Update third-party libraries:

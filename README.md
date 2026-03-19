@@ -89,12 +89,18 @@ OPEN_AI_SECRET=sk-xxxxxxxxxxxxxxxxxxxxxxxxxx uninews [-l <some language name>] <
 
 ## X.com / Twitter Support
 
-To read tweets and X threads, set the `X_BEARER_TOKEN` environment variable with an
-[OAuth 2.0 app-only Bearer Token](https://developer.twitter.com/en/docs/authentication/oauth-2-0/bearer-tokens)
-from the [X Developer Portal](https://developer.twitter.com/).
+To read tweets and X threads, set:
+
+1. `X_API_KEY` as your X App **Consumer Key**
+2. `X_API_SECRET` as your X App **Consumer Secret**
+
+`uninews` will exchange them for an app-only bearer token automatically.
+
+You can obtain both values from your X App dashboard under **Keys and tokens**.
 
 ```bash
-export X_BEARER_TOKEN=AAAA...your_bearer_token...
+export X_API_KEY=your_x_api_key
+export X_API_SECRET=your_x_api_secret
 uninews "https://x.com/user/status/1234567890"
 ```
 
@@ -102,17 +108,38 @@ uninews "https://x.com/user/status/1234567890"
 
 | Variable | Required | Description |
 |---|---|---|
-| `X_BEARER_TOKEN` | ✅ Yes (for X URLs) | OAuth 2.0 app-only Bearer Token obtained from the X Developer Portal |
+| `X_API_KEY` | Yes | X App Consumer Key / API Key from the **Keys and tokens** page. |
+| `X_API_SECRET` | Yes | X App Consumer Secret / API Secret from the same **Keys and tokens** page. |
+| `UNINEWS_CHROME_USER_DATA_DIR` | No | Chrome user-data directory for the secondary X Article browser fallback, if X withholds the article body from its web GraphQL payload and guest HTML. |
+| `UNINEWS_CHROME_PROFILE_DIR` | No | Chrome profile directory name such as `Default` or `Profile 1`, used with `UNINEWS_CHROME_USER_DATA_DIR`. |
+| `UNINEWS_CHROME_BINARY` | No | Override the Chrome/Chromium executable used for the secondary X Article browser fallback. |
 
 When a URL starts with `https://x.com/` or `https://twitter.com/`, uninews will:
 1. Extract the tweet ID from the URL.
 2. Fetch the tweet (and its author info) via the X API v2.
-3. Attempt to retrieve the full thread from the same author using the
+3. If the post is only sharing an external article link, follow the expanded article URL and scrape the linked article directly.
+4. If the post is only sharing an X Article link (`x.com/i/article/...`), fetch the article body from X's web GraphQL tweet payload.
+5. Only if X still withholds the article body there, fall back to the linked article URL / browser fallback path.
+6. Otherwise, attempt to retrieve the full thread from the same author using the
    recent-search endpoint (covers the last 7 days).
-4. Sort all thread tweets chronologically (oldest → newest).
-5. Pass the assembled content through the AI formatter, just like any other URL.
+7. Sort all thread tweets chronologically (oldest → newest).
+8. Pass the assembled content through the AI formatter, just like any other URL.
 
-If `X_BEARER_TOKEN` is not set, a clear error message is returned instead of silently failing.
+For `x.com/i/article/...` links, `uninews` now first asks X's web GraphQL endpoint for the article title and body text tied to the linking tweet. If X still hides the article body there, `uninews` will try a local Chrome headless fallback automatically. If X still serves the guest wall, point `UNINEWS_CHROME_USER_DATA_DIR` at a logged-in Chrome user-data directory and optionally set `UNINEWS_CHROME_PROFILE_DIR`.
+
+When those variables are set, `uninews` clones the selected Chrome profile into a temporary directory before launching headless Chrome, so your normal Chrome session can stay open and the live profile lock is not touched.
+
+Example on macOS:
+
+```bash
+export UNINEWS_CHROME_USER_DATA_DIR="$HOME/Library/Application Support/Google/Chrome"
+export UNINEWS_CHROME_PROFILE_DIR="Default"
+uninews "https://x.com/DiarioBitcoin/status/2034263054754726116"
+```
+
+If either `X_API_KEY` or `X_API_SECRET` is missing, a clear error message is returned instead of silently failing.
+
+This is **not** OAuth 1.0a user-context authentication. `uninews` uses your Consumer Key and Consumer Secret to obtain an OAuth 2.0 app-only bearer token for read-only X API requests.
 
 **Command line usage**
 ```
