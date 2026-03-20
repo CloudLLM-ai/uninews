@@ -1701,7 +1701,7 @@ async fn scrape_x_url(url: &str, language: &str, openai_model: Option<Model>) ->
 /// # How It Works
 ///
 /// 1. Retrieves OpenAI API key from `OPEN_AI_SECRET` environment variable
-/// 2. Initializes OpenAI client (uses GPT-5-Nano by default)
+/// 2. Initializes OpenAI client (uses GPT-5.4 Mini by default)
 /// 3. Creates an LLMSession with a system prompt instructing Markdown formatting
 /// 4. Sends the scraped Post as JSON to the LLM
 /// 5. Updates the Post's `content` field with formatted Markdown
@@ -1711,7 +1711,7 @@ async fn scrape_x_url(url: &str, language: &str, openai_model: Option<Model>) ->
 ///
 /// - `post`: The scraped Post with raw HTML content
 /// - `language`: Target language for output (e.g., "spanish", "french", "japanese")
-/// - `openai_model`: Optional specific GPT model to use (defaults to GPT-5-Nano)
+/// - `openai_model`: Optional specific GPT model to use (defaults to GPT-5.4 Mini)
 ///
 /// # Returns
 ///
@@ -1772,8 +1772,8 @@ pub async fn convert_content_to_markdown(
     let secret_key = env::var("OPEN_AI_SECRET")
         .map_err(|_| "Please set the OPEN_AI_SECRET environment variable.".to_string())?;
 
-    // Instantiate the OpenAI client. gpt-4o is default, fastest, and cheapest.
-    let model = openai_model.unwrap_or(Model::GPT4o);
+    // Instantiate the OpenAI client, defaulting to GPT-5.4 Mini unless overridden.
+    let model = openai_model.unwrap_or(Model::GPT54Mini);
     let client = Arc::new(OpenAIClient::new_with_model_enum(&secret_key, model));
 
     // Normalize language: if empty, default to "english".
@@ -1832,7 +1832,7 @@ pub async fn convert_content_to_markdown(
 ///
 /// - `url`: The URL of the article to scrape (must be a complete, valid URL)
 /// - `language`: Target language for output ("english", "spanish", "french", etc.)
-/// - `openai_model`: Optional OpenAI model to use; defaults to GPT-5-Nano
+/// - `openai_model`: Optional OpenAI model to use; defaults to GPT-5.4 Mini
 ///
 /// # Returns
 ///
@@ -1923,7 +1923,7 @@ pub async fn convert_content_to_markdown(
 ///     let post = universal_scrape(
 ///         "https://www.example.com/article",
 ///         "english",
-///         Some(Model::GPT5Nano) // Explicitly specify model
+///         Some(Model::GPT54Mini) // Explicitly specify model
 ///     ).await;
 /// }
 /// ```

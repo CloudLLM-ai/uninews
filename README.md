@@ -34,7 +34,7 @@ Options:
 ## Features
 
 - **Scraping & Cleaning:** Extracts the main content of a news article by targeting the `<article>` tag (or falling back to `<body>`) and removing unwanted elements.
-- **Markdown Conversion:** Uses gpt-4o through the [CloudLLM](https://github.com/CloudLLM-ai/cloudllm/tree/main) rust API to convert the cleaned HTML content into nicely formatted Markdown.
+- **Markdown Conversion:** Uses `Model::GPT54Mini` through the [CloudLLM](https://github.com/CloudLLM-ai/cloudllm/tree/main) Rust API to convert the cleaned HTML content into nicely formatted Markdown.
 - **X.com / Twitter Support:** Reads individual tweets and full X threads via the X API v2, assembling the thread chronologically before converting it to Markdown.
 - **Reusable Library:** The `universal_scrape` function is exposed for easy integration into other Rust projects.
 - **Multilanguage Support:** The `universal_scrape` function accepts an optional language parameter to specify the language of the article to scrape, otherwise it defaults to English.
@@ -169,7 +169,7 @@ If you've loaded your `OPEN_AI_SECRET` from a file or some other means, you can 
 using uninews::{universal_scrape, Post};
 
 // Scrape the URL and convert its content to Markdown in the requested language.
-let post = universal_scrape(&args.url, &args.language, Some(cloudllm::clients::openai::Model::GPT41Mini)).await;
+let post = universal_scrape(&args.url, &args.language, Some(cloudllm::clients::openai::Model::GPT54Mini)).await;
 if !post.error.is_empty() {
     eprintln!("Error during scraping: {}", post.error);
     return;

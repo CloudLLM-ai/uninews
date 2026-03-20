@@ -1,3 +1,7 @@
+0.38.1
+- Default `convert_content_to_markdown` to `Model::GPT54Mini`.
+- Update library docs and README examples to reflect the `GPT54Mini` default model.
+
 0.38.0
 - Added X.com support with X v2 API
   - Fetches tweets and author info via the X API v2.
