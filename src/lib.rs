@@ -6,7 +6,7 @@
 //!
 //! - **Intelligent HTML Parsing**: Extracts article content from complex HTML structures
 //! - **Smart Content Cleaning**: Automatically removes ads, scripts, navigation, and other noise
-//! - **AI-Powered Formatting**: Converts raw HTML to beautifully formatted Markdown using OpenAI's GPT models
+//! - **AI-Powered Formatting**: Converts raw HTML to near-lossless Markdown using OpenAI's GPT models
 //! - **Metadata Extraction**: Captures title, author, publication date, and featured images
 //! - **Multilingual Support**: Translates content to any language during processing
 //! - **Async/Await**: Built with Tokio for efficient async operations
@@ -56,7 +56,7 @@
 //! 2. Attempts to locate main content in `<article>` tags (priority) or `<body>` fallback
 //! 3. Removes 17 types of unwanted elements (scripts, styles, ads, navigation, etc.)
 //! 4. Cleans empty nodes and whitespace
-//! 5. Converts remaining HTML to Markdown using AI
+//! 5. Converts remaining HTML to Markdown using AI while preserving article wording and structure
 //! 6. Optionally translates to the requested language
 //!
 //! ## Error Handling
@@ -510,6 +510,37 @@ fn summarize_body(body: &str, max_len: usize) -> String {
         end -= 1;
     }
     format!("{}...", &trimmed[..end])
+}
+
+fn normalized_output_language(language: &str) -> &str {
+    if language.trim().is_empty() {
+        "english"
+    } else {
+        language
+    }
+}
+
+fn markdown_system_prompt(language: &str) -> String {
+    format!(
+        "You are an expert markdown formatter and translator for scraped news articles. \
+         The provided JSON already contains the extracted article body in the `content` field. \
+         Convert that content into clean Markdown in {} while preserving the source text and structure as fully as possible. \
+         Do not summarize, paraphrase, compress, or omit substantive details. \
+         Preserve paragraph order, list items, quotes, headings, names, dates, numbers, and factual claims. \
+         Only remove obvious HTML tags, duplicated boilerplate, or navigation noise that slipped through the scraper. \
+         If translation is requested, translate faithfully without shortening the article. \
+         Output only the final Markdown body text. If {} is not supported, default to english.",
+        language, language
+    )
+}
+
+fn markdown_user_prompt(language: &str, post_json: &str) -> String {
+    format!(
+        "Convert the following Post JSON into Markdown formatted text in {}. \
+         Treat `content` as the canonical article body and keep it nearly verbatim except for Markdown formatting, minimal cleanup, and faithful translation if needed. \
+         Do not add commentary and do not return JSON.\n\n{}",
+        language, post_json
+    )
 }
 
 fn x_debug_enabled() -> bool {
@@ -1701,7 +1732,7 @@ async fn scrape_x_url(url: &str, language: &str, openai_model: Option<Model>) ->
 /// # How It Works
 ///
 /// 1. Retrieves OpenAI API key from `OPEN_AI_SECRET` environment variable
-/// 2. Initializes OpenAI client (uses GPT-5.4 Mini by default)
+/// 2. Initializes OpenAI client (uses GPT-5.4 by default)
 /// 3. Creates an LLMSession with a system prompt instructing Markdown formatting
 /// 4. Sends the scraped Post as JSON to the LLM
 /// 5. Updates the Post's `content` field with formatted Markdown
@@ -1711,7 +1742,7 @@ async fn scrape_x_url(url: &str, language: &str, openai_model: Option<Model>) ->
 ///
 /// - `post`: The scraped Post with raw HTML content
 /// - `language`: Target language for output (e.g., "spanish", "french", "japanese")
-/// - `openai_model`: Optional specific GPT model to use (defaults to GPT-5.4 Mini)
+/// - `openai_model`: Optional specific GPT model to use (defaults to GPT-5.4)
 ///
 /// # Returns
 ///
@@ -1772,24 +1803,15 @@ pub async fn convert_content_to_markdown(
     let secret_key = env::var("OPEN_AI_SECRET")
         .map_err(|_| "Please set the OPEN_AI_SECRET environment variable.".to_string())?;
 
-    // Instantiate the OpenAI client, defaulting to GPT-5.4 Mini unless overridden.
-    let model = openai_model.unwrap_or(Model::GPT54Mini);
+    // Instantiate the OpenAI client, defaulting to GPT-5.4 unless overridden.
+    let model = openai_model.unwrap_or(Model::GPT54);
     let client = Arc::new(OpenAIClient::new_with_model_enum(&secret_key, model));
 
     // Normalize language: if empty, default to "english".
-    let lang = if language.trim().is_empty() {
-        "english"
-    } else {
-        language
-    };
+    let lang = normalized_output_language(language);
 
     // Define a system prompt that instructs the LLM on its role.
-    let system_prompt = format!(
-        "You are an expert markdown formatter and translator. Given a JSON object representing a news post, \
-         extract and output only the text content in Markdown format in {}. Remove all HTML tags and extra markup. \
-         Do not include any JSON keys or metadata—only the formatted content. If {} is not supported, default to english.",
-        lang, lang
-    );
+    let system_prompt = markdown_system_prompt(lang);
 
     // Create a new LLMSession.
     let mut session = LLMSession::new(client, system_prompt, 1000000);
@@ -1797,10 +1819,7 @@ pub async fn convert_content_to_markdown(
     // Serialize the entire Post to JSON.
     let post_json = serde_json::to_string(&post)
         .map_err(|e| format!("Failed to serialize Post to JSON: {}", e))?;
-    let user_prompt = format!(
-        "Convert the following Post JSON into Markdown formatted text in {} language, nothing else:\n\n{}",
-        lang, post_json
-    );
+    let user_prompt = markdown_user_prompt(lang, &post_json);
 
     // Send the prompt to the LLM.
     match session.send_message(Role::User, user_prompt, None).await {
@@ -1832,7 +1851,7 @@ pub async fn convert_content_to_markdown(
 ///
 /// - `url`: The URL of the article to scrape (must be a complete, valid URL)
 /// - `language`: Target language for output ("english", "spanish", "french", etc.)
-/// - `openai_model`: Optional OpenAI model to use; defaults to GPT-5.4 Mini
+/// - `openai_model`: Optional OpenAI model to use; defaults to GPT-5.4
 ///
 /// # Returns
 ///
@@ -1923,7 +1942,7 @@ pub async fn convert_content_to_markdown(
 ///     let post = universal_scrape(
 ///         "https://www.example.com/article",
 ///         "english",
-///         Some(Model::GPT54Mini) // Explicitly specify model
+///         Some(Model::GPT54) // Explicitly specify model
 ///     ).await;
 /// }
 /// ```
@@ -2240,5 +2259,26 @@ mod tests {
             post.author,
             Some("@DiarioBitcoin (Diario฿itcoin)".to_string())
         );
+    }
+
+    #[test]
+    fn test_normalized_output_language_defaults_to_english() {
+        assert_eq!(normalized_output_language(""), "english");
+        assert_eq!(normalized_output_language("   "), "english");
+        assert_eq!(normalized_output_language("spanish"), "spanish");
+    }
+
+    #[test]
+    fn test_markdown_prompts_require_near_lossless_preservation() {
+        let system_prompt = markdown_system_prompt("english");
+        let user_prompt = markdown_user_prompt("english", r#"{"content":"<p>Hello</p>"}"#);
+
+        assert!(
+            system_prompt.contains("preserving the source text and structure as fully as possible")
+        );
+        assert!(system_prompt
+            .contains("Do not summarize, paraphrase, compress, or omit substantive details"));
+        assert!(user_prompt.contains("Treat `content` as the canonical article body"));
+        assert!(user_prompt.contains("keep it nearly verbatim"));
     }
 }

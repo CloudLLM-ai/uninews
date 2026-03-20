@@ -3,7 +3,7 @@
 
 Uninews is a universal news smart scraper written in Rust.
 
-It downloads a news article from a given URL, cleans the HTML content, and leverages CloudLLM (via OpenAI) to convert the content into Markdown format.
+It downloads a news article from a given URL, cleans the HTML content, and leverages CloudLLM (via OpenAI) to convert the content into Markdown format with minimal loss.
 
 With its powerful translation capabilities, Uninews can seamlessly translate articles into multiple languages while preserving formatting, making it ideal for multilingual content processing.
 
@@ -34,7 +34,7 @@ Options:
 ## Features
 
 - **Scraping & Cleaning:** Extracts the main content of a news article by targeting the `<article>` tag (or falling back to `<body>`) and removing unwanted elements.
-- **Markdown Conversion:** Uses `Model::GPT54Mini` through the [CloudLLM](https://github.com/CloudLLM-ai/cloudllm/tree/main) Rust API to convert the cleaned HTML content into nicely formatted Markdown.
+- **Markdown Conversion:** Uses `Model::GPT54` (`gpt-5.4`) through the [CloudLLM](https://github.com/CloudLLM-ai/cloudllm/tree/main) Rust API to convert the cleaned HTML content into near-lossless Markdown.
 - **X.com / Twitter Support:** Reads individual tweets and full X threads via the X API v2, assembling the thread chronologically before converting it to Markdown.
 - **Reusable Library:** The `universal_scrape` function is exposed for easy integration into other Rust projects.
 - **Multilanguage Support:** The `universal_scrape` function accepts an optional language parameter to specify the language of the article to scrape, otherwise it defaults to English.
@@ -123,7 +123,7 @@ When a URL starts with `https://x.com/` or `https://twitter.com/`, uninews will:
 6. Otherwise, attempt to retrieve the full thread from the same author using the
    recent-search endpoint (covers the last 7 days).
 7. Sort all thread tweets chronologically (oldest → newest).
-8. Pass the assembled content through the AI formatter, just like any other URL.
+8. Pass the assembled content through the AI formatter, preserving the scraped article wording and structure as closely as possible.
 
 For `x.com/i/article/...` links, `uninews` now first asks X's web GraphQL endpoint for the article title and body text tied to the linking tweet. If X still hides the article body there, `uninews` will try a local Chrome headless fallback automatically. If X still serves the guest wall, point `UNINEWS_CHROME_USER_DATA_DIR` at a logged-in Chrome user-data directory and optionally set `UNINEWS_CHROME_PROFILE_DIR`.
 
@@ -166,10 +166,11 @@ If you've loaded your `OPEN_AI_SECRET` from a file or some other means, you can 
 
 
 ```rust
-using uninews::{universal_scrape, Post};
+use uninews::{universal_scrape, Post};
 
 // Scrape the URL and convert its content to Markdown in the requested language.
-let post = universal_scrape(&args.url, &args.language, Some(cloudllm::clients::openai::Model::GPT54Mini)).await;
+// By default, uninews uses cloudllm::clients::openai::Model::GPT54 for near-lossless formatting.
+let post = universal_scrape(&args.url, &args.language, Some(cloudllm::clients::openai::Model::GPT54)).await;
 if !post.error.is_empty() {
     eprintln!("Error during scraping: {}", post.error);
     return;

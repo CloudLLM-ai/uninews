@@ -1,3 +1,8 @@
+0.38.2
+- Default scrape-to-Markdown conversion to `Model::GPT54` (`gpt-5.4`) instead of `Model::GPT54Mini`.
+- Tighten the Markdown conversion prompt so scraped article bodies are preserved as fully as possible, avoiding lossy summarization or paraphrasing after extraction.
+- Update library docs and README examples to reflect the `GPT54` default model and the near-lossless formatting goal.
+
 0.38.1
 - Default `convert_content_to_markdown` to `Model::GPT54Mini`.
 - Update library docs and README examples to reflect the `GPT54Mini` default model.
