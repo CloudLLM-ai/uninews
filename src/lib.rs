@@ -610,12 +610,13 @@ fn x_text_urls(tweet: &XTweet) -> Vec<String> {
         .and_then(|entities| entities.urls.as_ref())
     {
         for url in entity_urls {
-            for candidate in [&url.url, &url.expanded_url, &url.unwound_url] {
-                if let Some(candidate) = candidate {
-                    let candidate = candidate.trim();
-                    if !candidate.is_empty() && !urls.iter().any(|url| url == candidate) {
-                        urls.push(candidate.to_string());
-                    }
+            for candidate in [&url.url, &url.expanded_url, &url.unwound_url]
+                .into_iter()
+                .flatten()
+            {
+                let candidate = candidate.trim();
+                if !candidate.is_empty() && !urls.iter().any(|url| url == candidate) {
+                    urls.push(candidate.to_string());
                 }
             }
         }
@@ -922,7 +923,7 @@ async fn fetch_rendered_dom_with_chrome(url: &str) -> Result<String, String> {
             Some(Ok((temp_root, profile_name))) => {
                 (Some(temp_root.clone()), Some(profile_name), Some(temp_root))
             }
-            Some(Err(err)) => return Err(io::Error::new(io::ErrorKind::Other, err)),
+            Some(Err(err)) => return Err(io::Error::other(err)),
             None => (None, profile_dir, None),
         };
 

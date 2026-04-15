@@ -1,3 +1,7 @@
+0.39.0
+- Resolve dependency security advisories by moving the direct `reqwest` dependency from `0.13.2` to the `0.12.x` line.
+- Refresh the Cargo lockfile to remove vulnerable `aws-lc-sys 0.38.0` and `rand 0.9.2`, and update `rustls-webpki` to a patched release.
+
 0.38.2
 - Default scrape-to-Markdown conversion to `Model::GPT54` (`gpt-5.4`) instead of `Model::GPT54Mini`.
 - Tighten the Markdown conversion prompt so scraped article bodies are preserved as fully as possible, avoiding lossy summarization or paraphrasing after extraction.
