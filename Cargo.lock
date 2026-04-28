@@ -282,14 +282,14 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "cloudllm"
-version = "0.14.0"
+version = "0.15.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d2d2d7953b5c6949328b4411831c001cbea6ba499324312923ad0c5f93db60e"
+checksum = "863fe7e8aaab474d3cf117fe84aab2914c0bfb88e0b6f513ca1d0b93967614cb"
 dependencies = [
  "async-trait",
  "bumpalo",
  "chrono",
- "cloudllm_mcp",
+ "cloudllm_mcp 0.3.2",
  "env_logger",
  "evalexpr",
  "futures-util",
@@ -321,6 +321,24 @@ dependencies = [
  "sha2",
  "subtle",
  "tokio",
+]
+
+[[package]]
+name = "cloudllm_mcp"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "197487c03c2ec9fb8eac21d1a8e81cc0957ae6fc6d2bede8907ed3804628a3a1"
+dependencies = [
+ "async-trait",
+ "axum",
+ "futures",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "subtle",
+ "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
@@ -665,12 +683,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "futures"
+version = "0.3.32"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b147ee9d1f6d097cef9ce628cd2ee62288d963e16fb287bd9286455b241382d"
+dependencies = [
+ "futures-channel",
+ "futures-core",
+ "futures-executor",
+ "futures-io",
+ "futures-sink",
+ "futures-task",
+ "futures-util",
+]
+
+[[package]]
 name = "futures-channel"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07bbe89c50d7a535e539b8c17bc0b49bdb77747034daa8087407d655f3f7cc1d"
 dependencies = [
  "futures-core",
+ "futures-sink",
 ]
 
 [[package]]
@@ -678,6 +712,17 @@ name = "futures-core"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7e3450815272ef58cec6d564423f6e755e25379b217b0bc688e295ba24df6b1d"
+
+[[package]]
+name = "futures-executor"
+version = "0.3.32"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "baf29c38818342a3b26b5b923639e7b1f4a61fc5e76102d4b1981c6dc7a7579d"
+dependencies = [
+ "futures-core",
+ "futures-task",
+ "futures-util",
+]
 
 [[package]]
 name = "futures-io"
@@ -714,6 +759,7 @@ version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "389ca41296e6190b48053de0321d02a77f32f8a5d2461dd38762c0593805c6d6"
 dependencies = [
+ "futures-channel",
  "futures-core",
  "futures-io",
  "futures-macro",
@@ -1233,7 +1279,7 @@ dependencies = [
  "axum",
  "bincode",
  "chrono",
- "cloudllm_mcp",
+ "cloudllm_mcp 0.1.0",
  "dashmap",
  "diffy",
  "ed25519-dalek",
@@ -2131,6 +2177,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-stream"
+version = "0.1.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32da49809aab5c3bc678af03902d4ccddea2a87d028d86392a4b1560c6906c70"
+dependencies = [
+ "futures-core",
+ "pin-project-lite",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "tokio-util"
 version = "0.7.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2241,7 +2299,7 @@ checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
 name = "uninews"
-version = "0.39.0"
+version = "0.39.1"
 dependencies = [
  "clap",
  "cloudllm",
