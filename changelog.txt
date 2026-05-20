@@ -1,6 +1,12 @@
 0.39.1
 - Security: bump `openssl` 0.10.77 → 0.10.80 and `openssl-sys` 0.9.113 → 0.9.116 to fix rust-openssl undefined-behavior advisory (X509Ref::ocsp_responders non-UTF-8 OCSP URLs)
 - Security: bump `rustls-webpki` 0.103.12 → 0.103.13 to fix DoS via panic on malformed CRL BIT STRING
+- Update dependencies:
+  - tokio 1.50.0 → 1.52.3
+  - cloudllm 0.15.3 → 0.15.4
+  - reqwest 0.12.24 → 0.13.3
+  - scraper 0.26.0 → 0.27.0
+  - clap 4.6.0 → 4.6.1
 
 0.39.0
 - Resolve dependency security advisories by moving the direct `reqwest` dependency from `0.13.2` to the `0.12.x` line.

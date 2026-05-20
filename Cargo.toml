@@ -9,10 +9,10 @@ repository = "https://github.com/CloudLLM-ai/uninews"
 
 
 [dependencies]
-tokio = { version = "1.50.0", features = ["full"] }
-cloudllm = "0.15.3"
-reqwest = { version = "0.12.24", features = ["json"] }
-scraper = "0.26.0"
+tokio = { version = "1.52.3", features = ["full"] }
+cloudllm = "0.15.4"
+reqwest = { version = "0.13.3", features = ["json"] }
+scraper = "0.27.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
-clap = { version = "4.6.0", features = ["derive"] }
+clap = { version = "4.6.1", features = ["derive"] }
