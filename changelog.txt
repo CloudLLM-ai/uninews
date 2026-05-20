@@ -1,3 +1,6 @@
+0.39.1
+- Security: bump `openssl` 0.10.77 → 0.10.80 and `openssl-sys` 0.9.113 → 0.9.116 to fix rust-openssl undefined-behavior advisory (X509Ref::ocsp_responders non-UTF-8 OCSP URLs)
+
 0.39.0
 - Resolve dependency security advisories by moving the direct `reqwest` dependency from `0.13.2` to the `0.12.x` line.
 - Refresh the Cargo lockfile to remove vulnerable `aws-lc-sys 0.38.0` and `rand 0.9.2`, and update `rustls-webpki` to a patched release.
