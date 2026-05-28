@@ -1,6 +1,6 @@
 [package]
 name = "uninews"
-version = "0.39.2"
+version = "0.40.0"
 edition = "2021"
 authors = ["Angel Leon <gubatron@gmail.com>"]
 description = "A universal news scraper for extracting content from various news blogs and news sites."
@@ -10,9 +10,9 @@ repository = "https://github.com/CloudLLM-ai/uninews"
 
 [dependencies]
 tokio = { version = "1.52.3", features = ["full"] }
-cloudllm = "0.15.4"
-reqwest = { version = "0.13.3", features = ["json"] }
+cloudllm = "0.15.5"
+reqwest = { version = "0.13.4", features = ["json"] }
 scraper = "0.27.0"
 serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
+serde_json = "1.0.150"
 clap = { version = "4.6.1", features = ["derive"] }
