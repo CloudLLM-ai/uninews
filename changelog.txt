@@ -1,3 +1,10 @@
+0.41.1
+- Bump `cloudllm` 0.15.6 → 0.15.7 (adds the `LLMClientInfo` trait + `provider_name()` on every client).
+- Switch the public introspection surface to the upstream `cloudllm::LLMClientInfo` trait. Uninews now re-exports it as `uninews::LLMClientInfo` and exposes two helpers that read the live `Arc<dyn ClientWrapper>`:
+  - `pub fn active_llm_client() -> Result<Arc<dyn ClientWrapper>, String>` — returns the active client; call `cloudllm::LLMClientInfo` methods on the returned `Arc`.
+  - `pub fn active_provider_label() -> String` — `"OpenAI (gpt-5.5)"` / `"OpenRouter (qwen/qwen3.7-max)"` / etc. Always reflects `UNINEWS_LLM_CLIENT` + `UNINEWS_LLM_MODEL` at call time, so chat notifications and log lines can drop their hardcoded model strings.
+- Drop the local `LLMClientInfo` trait + `ClientInfoWrapper` newtype that were in 0.41.0; the cloudllm-upstream version is the source of truth now.
+
 0.41.0
 - Pluggable LLM backend for Markdown conversion via `UNINEWS_LLM_CLIENT` and `UNINEWS_LLM_MODEL`. Supported providers: `openai` (default, `OPEN_AI_SECRET`), `openrouter` (`OPENROUTER_API_KEY`), `grok` (`XAI_API_KEY`), `gemini` (`GEMINI_API_KEY`), `claude` (`CLAUDE_API_KEY`).
 - Each provider has a built-in default model used when `UNINEWS_LLM_MODEL` is unset: `gpt-5.5` (openai), `openai/gpt-5.5` (openrouter), `grok-4.3` (grok), `gemini-3.5-flash` (gemini), `claude-opus-4.7-fast` (claude).

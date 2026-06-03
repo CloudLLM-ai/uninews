@@ -203,6 +203,67 @@ fn build_uninews_llm_client() -> Result<Arc<dyn ClientWrapper>, String> {
     }
 }
 
+/// Introspect the active CloudLLM client built by [`build_uninews_llm_client`].
+///
+/// This re-exports `cloudllm::LLMClientInfo` so callers can uniformly ask any
+/// `Arc<dyn ClientWrapper>` for its provider slug, model name, and configured
+/// tools without downcasting.
+pub use cloudllm::LLMClientInfo;
+
+/// Build the active CloudLLM client and return it for downstream introspection.
+///
+/// The returned `Arc<dyn ClientWrapper>` blanker-implements
+/// [`cloudllm::LLMClientInfo`] (since cloudllm 0.15.7), so callers can
+/// immediately call `llm_provider_name()`, `llm_model_name()`, and
+/// `llm_tools()` on it.
+///
+/// # Example
+///
+/// ```no_run
+/// use uninews::active_llm_client;
+/// use cloudllm::LLMClientInfo;
+/// if let Ok(client) = active_llm_client() {
+///     println!(
+///         "uninews is using {} ({})",
+///         client.llm_provider_name().unwrap_or("unknown"),
+///         client.llm_model_name().unwrap_or("unknown"),
+///     );
+/// }
+/// ```
+pub fn active_llm_client() -> Result<Arc<dyn ClientWrapper>, String> {
+    build_uninews_llm_client()
+}
+
+/// Return a one-line, human-readable label for the active LLM
+/// (`"OpenAI (gpt-5.5)"`, `"OpenRouter (qwen/qwen3.7-max)"`, …).
+///
+/// Built from the live `Arc<dyn ClientWrapper>` via the `LLMClientInfo`
+/// trait (cloudllm 0.15.7+), so it always reflects whatever
+/// `UNINEWS_LLM_CLIENT` / `UNINEWS_LLM_MODEL` are set to at call time.
+///
+/// # Example
+///
+/// ```no_run
+/// use uninews::active_provider_label;
+/// println!("uninews is using {}", active_provider_label());
+/// ```
+pub fn active_provider_label() -> String {
+    match build_uninews_llm_client() {
+        Ok(client) => {
+            let provider = client.llm_provider_name().unwrap_or("unknown");
+            let model = client.llm_model_name().unwrap_or("unknown");
+            format!("{} ({})", provider, model)
+        }
+        Err(_) => {
+            // Fall back to the env-derived defaults so chat notifications
+            // still render something useful even when the API key is missing.
+            let client_name = uninews_llm_client_name();
+            let model = uninews_llm_model(&client_name);
+            format!("{} ({})", client_name, model)
+        }
+    }
+}
+
 const BROWSER_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
 const X_WEB_BEARER_TOKEN: &str =
     "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";

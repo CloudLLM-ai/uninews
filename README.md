@@ -150,6 +150,33 @@ uninews https://example.com/article
 If `UNINEWS_LLM_CLIENT` is set to an unsupported value, or the matching API
 key env var is missing, Uninews returns a clear error in `Post::error`.
 
+### Introspecting the active LLM (library use)
+
+If you embed Uninews in another Rust app and want to surface the active
+provider/model in a chat notification or log line, the active client is
+exposed via the upstream `cloudllm::LLMClientInfo` trait (re-exported as
+`uninews::LLMClientInfo`):
+
+```rust
+use uninews::{active_llm_client, active_provider_label, LLMClientInfo};
+
+if let Ok(client) = active_llm_client() {
+    println!(
+        "uninews routed through {} ({})",
+        client.llm_provider_name().unwrap_or("unknown"),
+        client.llm_model_name().unwrap_or("unknown"),
+    );
+}
+
+// Or, for a one-line label that's safe to drop into any chat message:
+println!("Extrayendo con uninews usando {}...", active_provider_label());
+// → "Extrayendo con uninews usando OpenRouter (qwen/qwen3.7-max)..."
+```
+
+`active_provider_label()` always reflects whatever `UNINEWS_LLM_CLIENT` /
+`UNINEWS_LLM_MODEL` are set to at call time, so consumers can replace their
+hardcoded "GPT-5.5" / "Claude" / "Qwen" strings with a single call.
+
 ## X.com / Twitter Support
 
 To read tweets and X threads, set:

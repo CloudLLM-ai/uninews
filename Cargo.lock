@@ -312,9 +312,9 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "cloudllm"
-version = "0.15.6"
+version = "0.15.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba3588f336bac64fa236a9bab292fe23908f744f1f5ec0c7400c523241dd2eff"
+checksum = "9662ab67f626c0dba2a50b55a0e6d27e970a9fa9bd0eb28935d5bb38a546c77c"
 dependencies = [
  "async-trait",
  "bumpalo",
@@ -2672,7 +2672,7 @@ checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
 name = "uninews"
-version = "0.41.0"
+version = "0.41.1"
 dependencies = [
  "clap",
  "cloudllm",
