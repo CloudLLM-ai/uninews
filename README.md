@@ -3,7 +3,9 @@
 
 Uninews is a universal news smart scraper written in Rust.
 
-It downloads a news article from a given URL, cleans the HTML content, and leverages CloudLLM (via OpenAI) to convert the content into Markdown format with minimal loss.
+It downloads a news article from a given URL, cleans the HTML content, and leverages [CloudLLM](https://github.com/CloudLLM-ai/cloudllm) to convert the content into Markdown format with minimal loss.
+
+The LLM provider is pluggable via `UNINEWS_LLM_CLIENT` and `UNINEWS_LLM_MODEL` environment variables — see the [LLM Providers](#llm-providers) section. Out of the box Uninews talks to OpenAI, but you can route Markdown conversion through OpenRouter, xAI Grok, Google Gemini, or Anthropic Claude without changing your code.
 
 With its powerful translation capabilities, Uninews can seamlessly translate articles into multiple languages while preserving formatting, making it ideal for multilingual content processing.
 
@@ -34,7 +36,7 @@ Options:
 ## Features
 
 - **Scraping & Cleaning:** Extracts the main content of a news article by targeting the `<article>` tag (or falling back to `<body>`) and removing unwanted elements.
-- **Markdown Conversion:** Uses `Model::GPT55` (`gpt-5.5`) through the [CloudLLM](https://github.com/CloudLLM-ai/cloudllm/tree/main) Rust API to convert the cleaned HTML content into near-lossless Markdown.
+- **Markdown Conversion:** Uses the [CloudLLM](https://github.com/CloudLLM-ai/cloudllm/tree/main) Rust API to convert the cleaned HTML content into near-lossless Markdown. The LLM provider is pluggable via env vars (see [LLM Providers](#llm-providers)).
 - **X.com / Twitter Support:** Reads individual tweets and full X threads via the X API v2, assembling the thread chronologically before converting it to Markdown.
 - **Reusable Library:** The `universal_scrape` function is exposed for easy integration into other Rust projects.
 - **Multilanguage Support:** The `universal_scrape` function accepts an optional language parameter to specify the language of the article to scrape, otherwise it defaults to English.
@@ -78,14 +80,75 @@ make install
 ```
 
 5. **Run it in the command line:**
+
+OpenAI (default):
 ```bash
-# make sure to either export the OPEN_AI_SECRET token before running it
 export OPEN_AI_SECRET=sk-xxxxxxxxxxxxxxxxxxxxxxxxxx
 uninews <some post url>
-
-# or you can set it on the same statement and not export it
-OPEN_AI_SECRET=sk-xxxxxxxxxxxxxxxxxxxxxxxxxx uninews [-l <some language name>] <some post url>
 ```
+
+OpenRouter with any `vendor/model` slug (e.g. Qwen 3.7 Max):
+```bash
+export UNINEWS_LLM_CLIENT=openrouter
+export UNINEWS_LLM_MODEL=qwen/qwen3.7-max
+export OPENROUTER_API_KEY=sk-or-xxxxxxxxxxxxxxxxxxxxxxxxxx
+uninews <some post url>
+```
+
+Or, on a single line without exporting:
+```bash
+OPEN_AI_SECRET=sk-xxx uninews [-l <some language name>] <some post url>
+```
+
+## LLM Providers
+
+Uninews selects the LLM provider used to convert HTML to Markdown based on
+two environment variables:
+
+| Variable | Default | Description |
+|---|---|---|
+| `UNINEWS_LLM_CLIENT` | `openai` | One of `openai`, `openrouter`, `grok`, `gemini`, `claude`. |
+| `UNINEWS_LLM_MODEL`  | per-client | Free-form model slug. If unset, each client falls back to the default listed in the table below (e.g. `gpt-5.5` for `openai`, `openai/gpt-5.5` for `openrouter`). For OpenRouter you usually want a `vendor/model` slug (e.g. `qwen/qwen3.7-max`). |
+
+Each provider reads its API key from a dedicated env var. Only the one matching
+the active `UNINEWS_LLM_CLIENT` is consulted. When `UNINEWS_LLM_MODEL` is unset,
+each client falls back to its built-in default (rightmost column), so you only
+need to override `UNINEWS_LLM_MODEL` when you want a different model.
+
+| `UNINEWS_LLM_CLIENT` | API key env var | Default model when `UNINEWS_LLM_MODEL` is unset |
+|---|---|---|
+| `openai`     | `OPEN_AI_SECRET`     | `gpt-5.5` |
+| `openrouter` | `OPENROUTER_API_KEY` | `openai/gpt-5.5` (a `vendor/model` slug) |
+| `grok`       | `XAI_API_KEY`        | `grok-4.3` |
+| `gemini`     | `GEMINI_API_KEY`     | `gemini-3.5-flash` |
+| `claude`     | `CLAUDE_API_KEY`     | `claude-opus-4.7-fast` |
+
+### Examples
+
+**OpenAI (default):**
+```bash
+export OPEN_AI_SECRET=sk-xxx
+uninews https://example.com/article
+```
+
+**OpenRouter with Qwen 3.7 Max:**
+```bash
+export UNINEWS_LLM_CLIENT=openrouter
+export UNINEWS_LLM_MODEL=qwen/qwen3.7-max
+export OPENROUTER_API_KEY=sk-or-xxx
+uninews https://example.com/article
+```
+
+**Anthropic Claude:**
+```bash
+export UNINEWS_LLM_CLIENT=claude
+export UNINEWS_LLM_MODEL=claude-sonnet-4-6
+export CLAUDE_API_KEY=sk-ant-xxx
+uninews https://example.com/article
+```
+
+If `UNINEWS_LLM_CLIENT` is set to an unsupported value, or the matching API
+key env var is missing, Uninews returns a clear error in `Post::error`.
 
 ## X.com / Twitter Support
 
@@ -159,18 +222,18 @@ Options:
 
 **Integrating it with your rust project**
 
-**uninews** requires the `OPEN_AI_SECRET` environment variable to be set, you can set it in your code before calling the `universal_scrape` function.
-
-If you've loaded your `OPEN_AI_SECRET` from a file or some other means, you can set it like this so uninews won't break:
-`std::env::set_var("OPEN_AI_SECRET", my_open_ai_secret);`
-
+Uninews reads the LLM provider from `UNINEWS_LLM_CLIENT` and `UNINEWS_LLM_MODEL`. If you want to override them in code (instead of via `std::env::set_var`), do it before calling `universal_scrape`. For example, to force OpenRouter with a Qwen model from inside your app:
 
 ```rust
 use uninews::{universal_scrape, Post};
 
+// Route Markdown conversion through OpenRouter
+std::env::set_var("UNINEWS_LLM_CLIENT", "openrouter");
+std::env::set_var("UNINEWS_LLM_MODEL", "qwen/qwen3.7-max");
+std::env::set_var("OPENROUTER_API_KEY", "sk-or-...");
+
 // Scrape the URL and convert its content to Markdown in the requested language.
-// By default, uninews uses cloudllm::clients::openai::Model::GPT55 for near-lossless formatting.
-let post = universal_scrape(&args.url, &args.language, Some(cloudllm::clients::openai::Model::GPT55)).await;
+let post = universal_scrape(&url, "english").await;
 if !post.error.is_empty() {
     eprintln!("Error during scraping: {}", post.error);
     return;
@@ -179,6 +242,10 @@ if !post.error.is_empty() {
 // Print the title and Markdown-formatted content.
 println!("{}\n\n{}", post.title, post.content);
 ```
+
+If you only need OpenAI, just set `OPEN_AI_SECRET` once (e.g. before starting
+your process) and call `universal_scrape(url, "english")` — Uninews will pick
+it up.
 
 Licensed under the MIT License.
 

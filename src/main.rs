@@ -30,14 +30,20 @@
 //! - 📝 Automatic conversion to clean Markdown format
 //! - 🌍 Support for 100+ languages via AI translation
 //! - 📊 JSON output for programmatic use
-//! - 🚀 Powered by OpenAI's GPT models
+//! - 🚀 Pluggable LLM backend (OpenAI, OpenRouter, Grok, Gemini, Claude)
 //! - 🛡️ Graceful error handling with user-friendly messages
 //!
 //! ## Setup
 //!
-//! 1. Set your OpenAI API key:
+//! 1. Pick a provider and set its API key env var. Default is OpenAI:
 //! ```bash
 //! export OPEN_AI_SECRET="sk-..."
+//! ```
+//! Or, route through OpenRouter with any `vendor/model` slug:
+//! ```bash
+//! export UNINEWS_LLM_CLIENT=openrouter
+//! export UNINEWS_LLM_MODEL=qwen/qwen3.7-max
+//! export OPENROUTER_API_KEY="sk-or-..."
 //! ```
 //!
 //! 2. Run:
@@ -165,15 +171,14 @@ async fn main() {
     let args = Args::parse();
 
     // Scrape the URL and convert its content to Markdown in the requested language.
-    let post = universal_scrape(&args.url, &args.language, None).await;
+    // The LLM provider is selected via UNINEWS_LLM_CLIENT / UNINEWS_LLM_MODEL env vars.
+    let post = universal_scrape(&args.url, &args.language).await;
 
     // Check for errors during scraping
     if !post.error.is_empty() {
         eprintln!("❌ Error during scraping: {}", post.error);
         return;
     }
-
-    // TODO: make the LLM Client an option [--client <openai|grok|gemini|claude>]
 
     if args.json {
         // Serialize the Post object to JSON and print it.

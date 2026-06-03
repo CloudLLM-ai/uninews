@@ -18,11 +18,11 @@
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     // Make sure OPEN_AI_SECRET environment variable is set
+//!     // Make sure the env var for your chosen UNINEWS_LLM_CLIENT is set
+//!     // (OPEN_AI_SECRET by default, OPENROUTER_API_KEY for openrouter, etc.)
 //!     let post = universal_scrape(
 //!         "https://example.com/article",
 //!         "english",
-//!         None
 //!     ).await;
 //!
 //!     if post.error.is_empty() {
@@ -67,7 +67,7 @@
 //! # use uninews::universal_scrape;
 //! # #[tokio::main]
 //! # async fn main() {
-//! let post = universal_scrape("https://invalid-url-example", "english", None).await;
+//! let post = universal_scrape("https://invalid-url-example", "english").await;
 //!
 //! if !post.error.is_empty() {
 //!     match post.error.as_str() {
@@ -93,9 +93,115 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 // CloudLLM imports.
-use cloudllm::client_wrapper::Role;
-use cloudllm::clients::openai::{Model, OpenAIClient};
+use cloudllm::client_wrapper::{ClientWrapper, Role};
+use cloudllm::clients::claude::ClaudeClient;
+use cloudllm::clients::gemini::GeminiClient;
+use cloudllm::clients::grok::GrokClient;
+use cloudllm::clients::openai::{Model as OpenAIModel, OpenAIClient};
+use cloudllm::clients::openrouter::OpenRouterClient;
 use cloudllm::LLMSession;
+
+/// Default LLM client when `UNINEWS_LLM_CLIENT` is unset.
+const DEFAULT_LLM_CLIENT: &str = "openai";
+
+/// Per-client default model slug, used when `UNINEWS_LLM_MODEL` is unset.
+///
+/// Source of truth for the table in `README.md` → "LLM Providers" →
+/// "Supported providers".
+fn default_llm_model_for(client_name: &str) -> &'static str {
+    match client_name {
+        "openai" => "gpt-5.5",
+        "openrouter" => "openai/gpt-5.5",
+        "grok" => "grok-4.3",
+        "gemini" => "gemini-3.5-flash",
+        "claude" => "claude-opus-4.7-fast",
+        // Fall back to OpenAI's default for any future/unknown client name.
+        _ => "gpt-5.5",
+    }
+}
+
+/// Read the LLM client name from `UNINEWS_LLM_CLIENT`, defaulting to
+/// [`DEFAULT_LLM_CLIENT`].
+fn uninews_llm_client_name() -> String {
+    env::var("UNINEWS_LLM_CLIENT")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_LLM_CLIENT.to_string())
+        .to_ascii_lowercase()
+}
+
+/// Read the LLM model slug from `UNINEWS_LLM_MODEL`, falling back to the
+/// per-client default returned by [`default_llm_model_for`] when unset.
+fn uninews_llm_model(client_name: &str) -> String {
+    env::var("UNINEWS_LLM_MODEL")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| default_llm_model_for(client_name).to_string())
+}
+
+/// Build the CloudLLM client selected by `UNINEWS_LLM_CLIENT` / `UNINEWS_LLM_MODEL`.
+///
+/// Each client reads its API key from a provider-specific environment variable:
+/// - `openai`      → `OPEN_AI_SECRET`
+/// - `openrouter`  → `OPENROUTER_API_KEY`
+/// - `grok`        → `XAI_API_KEY`
+/// - `gemini`      → `GEMINI_API_KEY`
+/// - `claude`      → `CLAUDE_API_KEY`  (Anthropic Claude)
+///
+/// If `UNINEWS_LLM_MODEL` is unset, the per-client default from
+/// [`default_llm_model_for`] is used (see the README's "LLM Providers" table).
+fn build_uninews_llm_client() -> Result<Arc<dyn ClientWrapper>, String> {
+    let client_name = uninews_llm_client_name();
+    let model = uninews_llm_model(&client_name);
+
+    match client_name.as_str() {
+        "openai" => {
+            let key = env::var("OPEN_AI_SECRET")
+                .map_err(|_| "Please set the OPEN_AI_SECRET environment variable.".to_string())?;
+            // Use the enum-based constructor when the model string matches the
+            // built-in GPT55 default; this keeps the strong-typed path warm.
+            if model == "gpt-5.5" {
+                Ok(Arc::new(OpenAIClient::new_with_model_enum(
+                    &key,
+                    OpenAIModel::GPT55,
+                )))
+            } else {
+                Ok(Arc::new(OpenAIClient::new_with_model_string(&key, &model)))
+            }
+        }
+        "openrouter" => {
+            let key = env::var("OPENROUTER_API_KEY").map_err(|_| {
+                "Please set the OPENROUTER_API_KEY environment variable.".to_string()
+            })?;
+            Ok(Arc::new(OpenRouterClient::new_with_model_str(
+                &key, &model,
+            )))
+        }
+        "grok" => {
+            let key = env::var("XAI_API_KEY")
+                .map_err(|_| "Please set the XAI_API_KEY environment variable.".to_string())?;
+            Ok(Arc::new(GrokClient::new_with_model_str(&key, &model)))
+        }
+        "gemini" => {
+            let key = env::var("GEMINI_API_KEY")
+                .map_err(|_| "Please set the GEMINI_API_KEY environment variable.".to_string())?;
+            Ok(Arc::new(GeminiClient::new_with_model_string(
+                &key, &model,
+            )))
+        }
+        "claude" => {
+            let key = env::var("CLAUDE_API_KEY")
+                .map_err(|_| "Please set the CLAUDE_API_KEY environment variable.".to_string())?;
+            Ok(Arc::new(ClaudeClient::new_with_model_str(&key, &model)))
+        }
+        other => Err(format!(
+            "Unsupported UNINEWS_LLM_CLIENT '{}'. Allowed: openai, openrouter, grok, gemini, claude.",
+            other
+        )),
+    }
+}
 
 const BROWSER_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
 const X_WEB_BEARER_TOKEN: &str =
@@ -1325,7 +1431,6 @@ async fn scrape_web_url_raw_with_title_override(url: &str, title_override: Optio
 async fn scrape_web_url_with_title_override(
     url: &str,
     language: &str,
-    openai_model: Option<Model>,
     title_override: Option<&str>,
 ) -> Post {
     let scraped_post = scrape_web_url_raw_with_title_override(url, title_override).await;
@@ -1333,7 +1438,7 @@ async fn scrape_web_url_with_title_override(
         return scraped_post;
     }
 
-    match convert_content_to_markdown(scraped_post.clone(), language, openai_model).await {
+    match convert_content_to_markdown(scraped_post.clone(), language).await {
         Ok(markdown_post) => markdown_post,
         Err(err) => Post {
             error: err,
@@ -1342,8 +1447,8 @@ async fn scrape_web_url_with_title_override(
     }
 }
 
-async fn scrape_web_url(url: &str, language: &str, openai_model: Option<Model>) -> Post {
-    scrape_web_url_with_title_override(url, language, openai_model, None).await
+async fn scrape_web_url(url: &str, language: &str) -> Post {
+    scrape_web_url_with_title_override(url, language, None).await
 }
 
 /// Fetches a tweet or X thread via the Twitter/X API v2 and returns a [`Post`].
@@ -1366,7 +1471,7 @@ async fn scrape_web_url(url: &str, language: &str, openai_model: Option<Model>) 
 /// # Errors
 ///
 /// All errors are non-fatal and are returned inside [`Post::error`].
-async fn scrape_x_url(url: &str, language: &str, openai_model: Option<Model>) -> Post {
+async fn scrape_x_url(url: &str, language: &str) -> Post {
     // ── 1. Extract the tweet ID from the URL ─────────────────────────────────
     let tweet_id = match extract_tweet_id(url) {
         Some(id) => id,
@@ -1551,13 +1656,7 @@ async fn scrape_x_url(url: &str, language: &str, openai_model: Option<Model>) ->
                 error: String::new(),
             };
 
-            return match convert_content_to_markdown(
-                scraped_article_post.clone(),
-                language,
-                openai_model,
-            )
-            .await
-            {
+            return match convert_content_to_markdown(scraped_article_post.clone(), language).await {
                 Ok(markdown_post) => markdown_post,
                 Err(err) => Post {
                     error: err,
@@ -1581,7 +1680,6 @@ async fn scrape_x_url(url: &str, language: &str, openai_model: Option<Model>) ->
                         return match convert_content_to_markdown(
                             scraped_article_post.clone(),
                             language,
-                            openai_model,
                         )
                         .await
                         {
@@ -1596,7 +1694,6 @@ async fn scrape_x_url(url: &str, language: &str, openai_model: Option<Model>) ->
                         let article_post = scrape_web_url_with_title_override(
                             &article_url,
                             language,
-                            openai_model,
                             article_title_override,
                         )
                         .await;
@@ -1619,13 +1716,9 @@ async fn scrape_x_url(url: &str, language: &str, openai_model: Option<Model>) ->
                 }
             }
 
-            let article_post = scrape_web_url_with_title_override(
-                &article_url,
-                language,
-                openai_model,
-                article_title_override,
-            )
-            .await;
+            let article_post =
+                scrape_web_url_with_title_override(&article_url, language, article_title_override)
+                    .await;
             if article_post.error.is_empty() {
                 return article_post;
             }
@@ -1715,7 +1808,7 @@ async fn scrape_x_url(url: &str, language: &str, openai_model: Option<Model>) ->
     };
 
     // ── 7. AI Markdown conversion & optional translation ──────────────────────
-    match convert_content_to_markdown(scraped_post.clone(), language, openai_model).await {
+    match convert_content_to_markdown(scraped_post.clone(), language).await {
         Ok(markdown_post) => markdown_post,
         Err(err) => Post {
             error: err,
@@ -1732,18 +1825,16 @@ async fn scrape_x_url(url: &str, language: &str, openai_model: Option<Model>) ->
 ///
 /// # How It Works
 ///
-/// 1. Retrieves OpenAI API key from `OPEN_AI_SECRET` environment variable
-/// 2. Initializes OpenAI client (uses GPT-5.5 by default)
-/// 3. Creates an LLMSession with a system prompt instructing Markdown formatting
-/// 4. Sends the scraped Post as JSON to the LLM
-/// 5. Updates the Post's `content` field with formatted Markdown
-/// 6. Optionally translates to the requested language
+/// 1. Builds a CloudLLM client based on `UNINEWS_LLM_CLIENT` / `UNINEWS_LLM_MODEL`
+/// 2. Creates an LLMSession with a system prompt instructing Markdown formatting
+/// 3. Sends the scraped Post as JSON to the LLM
+/// 4. Updates the Post's `content` field with formatted Markdown
+/// 5. Optionally translates to the requested language
 ///
 /// # Arguments
 ///
 /// - `post`: The scraped Post with raw HTML content
 /// - `language`: Target language for output (e.g., "spanish", "french", "japanese")
-/// - `openai_model`: Optional specific GPT model to use (defaults to GPT-5.5)
 ///
 /// # Returns
 ///
@@ -1752,21 +1843,32 @@ async fn scrape_x_url(url: &str, language: &str, openai_model: Option<Model>) ->
 ///
 /// # Environment Variables
 ///
-/// Requires: `OPEN_AI_SECRET` - Your OpenAI API key
+/// - `UNINEWS_LLM_CLIENT` - Provider to use. Defaults to `openai`. Allowed:
+///   `openai`, `openrouter`, `grok`, `gemini`, `claude`.
+/// - `UNINEWS_LLM_MODEL`  - Model slug forwarded to the provider. If unset,
+///   each client falls back to a built-in default (e.g. `gpt-5.5` for `openai`,
+///   `openai/gpt-5.5` for `openrouter`). For OpenRouter you usually want a
+///   `vendor/model` slug (e.g. `qwen/qwen3.7-max`).
+/// - One provider-specific API key env var is required:
+///   - `openai`     → `OPEN_AI_SECRET`
+///   - `openrouter` → `OPENROUTER_API_KEY`
+///   - `grok`       → `XAI_API_KEY`
+///   - `gemini`     → `GEMINI_API_KEY`
+///   - `claude`     → `CLAUDE_API_KEY`
 ///
 /// # Errors
 ///
 /// Returns error if:
-/// - `OPEN_AI_SECRET` environment variable is not set
+/// - The required API key env var for the selected client is not set
+/// - `UNINEWS_LLM_CLIENT` is set to an unsupported value
 /// - Post serialization to JSON fails
-/// - OpenAI API communication fails
+/// - LLM API communication fails
 /// - LLM returns an error response
 ///
 /// # Examples
 ///
 /// ```rust,no_run
 /// # use uninews::{Post, convert_content_to_markdown};
-/// # use cloudllm::clients::openai::Model;
 /// #[tokio::main]
 /// async fn main() {
 ///     let post = Post {
@@ -1778,8 +1880,8 @@ async fn scrape_x_url(url: &str, language: &str, openai_model: Option<Model>) ->
 ///         error: String::new(),
 ///     };
 ///
-///     // Convert with default model
-///     match convert_content_to_markdown(post, "english", None).await {
+///     // Convert with the provider selected via UNINEWS_LLM_CLIENT (default: openai / gpt-5.5)
+///     match convert_content_to_markdown(post, "english").await {
 ///         Ok(markdown_post) => println!("{}", markdown_post.content),
 ///         Err(e) => eprintln!("Conversion failed: {}", e),
 ///     }
@@ -1795,18 +1897,9 @@ async fn scrape_x_url(url: &str, language: &str, openai_model: Option<Model>) ->
 /// - And many more...
 ///
 /// If the specified language is not recognized, the output defaults to English.
-pub async fn convert_content_to_markdown(
-    mut post: Post,
-    language: &str,
-    openai_model: Option<Model>,
-) -> Result<Post, String> {
-    // Get the secret key from the environment.
-    let secret_key = env::var("OPEN_AI_SECRET")
-        .map_err(|_| "Please set the OPEN_AI_SECRET environment variable.".to_string())?;
-
-    // Instantiate the OpenAI client, defaulting to GPT-5.5 unless overridden.
-    let model = openai_model.unwrap_or(Model::GPT55);
-    let client = Arc::new(OpenAIClient::new_with_model_enum(&secret_key, model));
+pub async fn convert_content_to_markdown(mut post: Post, language: &str) -> Result<Post, String> {
+    // Build the CloudLLM client selected by UNINEWS_LLM_CLIENT / UNINEWS_LLM_MODEL.
+    let client = build_uninews_llm_client()?;
 
     // Normalize language: if empty, default to "english".
     let lang = normalized_output_language(language);
@@ -1852,7 +1945,6 @@ pub async fn convert_content_to_markdown(
 ///
 /// - `url`: The URL of the article to scrape (must be a complete, valid URL)
 /// - `language`: Target language for output ("english", "spanish", "french", etc.)
-/// - `openai_model`: Optional OpenAI model to use; defaults to GPT-5.5
 ///
 /// # Returns
 ///
@@ -1869,7 +1961,9 @@ pub async fn convert_content_to_markdown(
 ///
 /// # Environment Variables
 ///
-/// Requires: `OPEN_AI_SECRET` - Your OpenAI API key
+/// See [`convert_content_to_markdown`] for the full list of supported
+/// `UNINEWS_LLM_CLIENT` / `UNINEWS_LLM_MODEL` values and the
+/// provider-specific API key env vars.
 ///
 /// # Performance Considerations
 ///
@@ -1898,7 +1992,6 @@ pub async fn convert_content_to_markdown(
 ///     let post = universal_scrape(
 ///         "https://www.example.com/news/article",
 ///         "english",
-///         None
 ///     ).await;
 ///
 ///     if post.error.is_empty() {
@@ -1923,7 +2016,6 @@ pub async fn convert_content_to_markdown(
 ///     let post = universal_scrape(
 ///         "https://www.bbc.com/news/article",
 ///         "spanish",
-///         None
 ///     ).await;
 ///
 ///     if post.error.is_empty() {
@@ -1933,19 +2025,16 @@ pub async fn convert_content_to_markdown(
 /// }
 /// ```
 ///
-/// ## Custom Model Selection
+/// ## Provider Selection
 ///
-/// ```rust,no_run
-/// # use uninews::universal_scrape;
-/// # use cloudllm::clients::openai::Model;
-/// #[tokio::main]
-/// async fn main() {
-///     let post = universal_scrape(
-///         "https://www.example.com/article",
-///         "english",
-///         Some(Model::GPT55) // Explicitly specify model
-///     ).await;
-/// }
+/// Set `UNINEWS_LLM_CLIENT` and `UNINEWS_LLM_MODEL` before calling to route the
+/// Markdown conversion through a different provider (e.g. OpenRouter).
+///
+/// ```no_run
+/// # // This is documentation only; you would set these in your shell:
+/// # //   export UNINEWS_LLM_CLIENT=openrouter
+/// # //   export UNINEWS_LLM_MODEL=qwen/qwen3.7-max
+/// # //   export OPENROUTER_API_KEY=sk-or-...
 /// ```
 ///
 /// # Real-World Example: Building an RSS Reader
@@ -1960,7 +2049,7 @@ pub async fn convert_content_to_markdown(
 ///     ];
 ///
 ///     for url in article_urls {
-///         let post = universal_scrape(url, "english", None).await;
+///         let post = universal_scrape(url, "english").await;
 ///
 ///         if post.error.is_empty() {
 ///             // Successfully processed
@@ -1989,12 +2078,12 @@ pub async fn convert_content_to_markdown(
 /// - JavaScript-heavy single-page apps (content loaded dynamically)
 /// - Paywalled content
 /// - Sites with aggressive anti-scraping measures
-pub async fn universal_scrape(url: &str, language: &str, openai_model: Option<Model>) -> Post {
+pub async fn universal_scrape(url: &str, language: &str) -> Post {
     // Delegate to the X.com handler for X / Twitter URLs.
     if is_x_url(url) {
-        return scrape_x_url(url, language, openai_model).await;
+        return scrape_x_url(url, language).await;
     }
-    scrape_web_url(url, language, openai_model).await
+    scrape_web_url(url, language).await
 }
 
 #[cfg(test)]

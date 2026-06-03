@@ -1,3 +1,10 @@
+0.41.0
+- Pluggable LLM backend for Markdown conversion via `UNINEWS_LLM_CLIENT` and `UNINEWS_LLM_MODEL`. Supported providers: `openai` (default, `OPEN_AI_SECRET`), `openrouter` (`OPENROUTER_API_KEY`), `grok` (`XAI_API_KEY`), `gemini` (`GEMINI_API_KEY`), `claude` (`CLAUDE_API_KEY`).
+- Each provider has a built-in default model used when `UNINEWS_LLM_MODEL` is unset: `gpt-5.5` (openai), `openai/gpt-5.5` (openrouter), `grok-4.3` (grok), `gemini-3.5-flash` (gemini), `claude-opus-4.7-fast` (claude).
+- **Breaking**: `universal_scrape` and `convert_content_to_markdown` no longer take an `openai_model: Option<Model>` argument. Provider + model are now selected exclusively via the `UNINEWS_LLM_CLIENT` / `UNINEWS_LLM_MODEL` env vars. Update call sites accordingly.
+- Bump `cloudllm` 0.15.5 → 0.15.6
+- Update library docs, examples, and README to document the new env-var-driven provider selection and per-client model defaults
+
 0.40.0
 - Bump version to 0.40.0
 - Update dependencies:
