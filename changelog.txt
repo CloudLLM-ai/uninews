@@ -1,3 +1,10 @@
+0.42.1
+- Add an optional `context_window_tokens: Option<usize>` parameter to `convert_content_to_markdown` and `universal_scrape` so callers can pin the LLM context-window budget per call without touching env vars.
+- When the new parameter is `None`, the budget is read from the new `UNINEWS_LLM_CONTEXT_WINDOW` env var; invalid or non-positive values fall back to the new `DEFAULT_LLM_CONTEXT_WINDOW` (256,000 tokens) with a warning to stderr. Embedders (e.g. diariobitcoin's `dbtc_canuto`) can therefore tune the budget at runtime via the canuto properties file using the existing `UNINEWS_LLM_*` env-var bridge.
+- Expose `pub const DEFAULT_LLM_CONTEXT_WINDOW: usize = 256_000`, `pub const UNINEWS_LLM_CONTEXT_WINDOW_ENV: &str = "UNINEWS_LLM_CONTEXT_WINDOW"`, and `pub fn llm_context_window() -> usize` for library introspection. The previous hard-coded 1,000,000-token `LLMSession` budget is replaced.
+- **Breaking**: `universal_scrape` and `convert_content_to_markdown` now require a third argument (`Option<usize>`). Pass `None` to keep the prior env-var-driven behavior.
+- Update rustdoc, README, and tests to cover the new env var + per-call override.
+
 0.41.1
 - Bump `cloudllm` 0.15.6 → 0.15.7 (adds the `LLMClientInfo` trait + `provider_name()` on every client).
 - Switch the public introspection surface to the upstream `cloudllm::LLMClientInfo` trait. Uninews now re-exports it as `uninews::LLMClientInfo` and exposes two helpers that read the live `Arc<dyn ClientWrapper>`:

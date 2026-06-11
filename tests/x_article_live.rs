@@ -18,7 +18,7 @@ async fn reads_linked_article_from_x_status() {
         return;
     }
 
-    let post = universal_scrape(DIARIOBITCOIN_X_ARTICLE_STATUS_URL, "english").await;
+    let post = universal_scrape(DIARIOBITCOIN_X_ARTICLE_STATUS_URL, "english", None).await;
 
     assert!(
         post.error.is_empty(),

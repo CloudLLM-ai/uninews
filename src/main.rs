@@ -172,7 +172,9 @@ async fn main() {
 
     // Scrape the URL and convert its content to Markdown in the requested language.
     // The LLM provider is selected via UNINEWS_LLM_CLIENT / UNINEWS_LLM_MODEL env vars.
-    let post = universal_scrape(&args.url, &args.language).await;
+    // Pass `None` so the context window is resolved from UNINEWS_LLM_CONTEXT_WINDOW
+    // (default: 256,000 tokens, see `uninews::DEFAULT_LLM_CONTEXT_WINDOW`).
+    let post = universal_scrape(&args.url, &args.language, None).await;
 
     // Check for errors during scraping
     if !post.error.is_empty() {

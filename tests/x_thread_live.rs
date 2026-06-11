@@ -17,7 +17,7 @@ async fn reads_live_diariobitcoin_x_thread() {
         return;
     }
 
-    let post = universal_scrape(DIARIOBITCOIN_THREAD_URL, "english").await;
+    let post = universal_scrape(DIARIOBITCOIN_THREAD_URL, "english", None).await;
 
     assert!(
         post.error.is_empty() || post.error.contains("OPEN_AI_SECRET"),

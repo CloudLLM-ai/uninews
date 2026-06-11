@@ -103,12 +103,14 @@ OPEN_AI_SECRET=sk-xxx uninews [-l <some language name>] <some post url>
 ## LLM Providers
 
 Uninews selects the LLM provider used to convert HTML to Markdown based on
-two environment variables:
+two environment variables, and lets you tune the LLM context window with a
+third:
 
 | Variable | Default | Description |
 |---|---|---|
 | `UNINEWS_LLM_CLIENT` | `openai` | One of `openai`, `openrouter`, `grok`, `gemini`, `claude`. |
 | `UNINEWS_LLM_MODEL`  | per-client | Free-form model slug. If unset, each client falls back to the default listed in the table below (e.g. `gpt-5.5` for `openai`, `openai/gpt-5.5` for `openrouter`). For OpenRouter you usually want a `vendor/model` slug (e.g. `qwen/qwen3.7-max`). |
+| `UNINEWS_LLM_CONTEXT_WINDOW` | `256000` | LLM context-window budget (in tokens) used by `LLMSession` while formatting the Markdown. Bump this when the model you point at via `UNINEWS_LLM_MODEL` supports a larger context (e.g. Gemini-class 1M+ models) or a longer article blows past the default. Library callers can also pass `Some(n)` to `universal_scrape` / `convert_content_to_markdown` to override per call; the explicit argument always wins. Invalid or non-positive values fall back to the default. |
 
 Each provider reads its API key from a dedicated env var. Only the one matching
 the active `UNINEWS_LLM_CLIENT` is consulted. When `UNINEWS_LLM_MODEL` is unset,
@@ -131,10 +133,11 @@ export OPEN_AI_SECRET=sk-xxx
 uninews https://example.com/article
 ```
 
-**OpenRouter with Qwen 3.7 Max:**
+**OpenRouter with Qwen 3.7 Max and a 2M context budget:**
 ```bash
 export UNINEWS_LLM_CLIENT=openrouter
 export UNINEWS_LLM_MODEL=qwen/qwen3.7-max
+export UNINEWS_LLM_CONTEXT_WINDOW=2000000
 export OPENROUTER_API_KEY=sk-or-xxx
 uninews https://example.com/article
 ```
@@ -158,7 +161,7 @@ exposed via the upstream `cloudllm::LLMClientInfo` trait (re-exported as
 `uninews::LLMClientInfo`):
 
 ```rust
-use uninews::{active_llm_client, active_provider_label, LLMClientInfo};
+use uninews::{active_llm_client, active_provider_label, llm_context_window, LLMClientInfo};
 
 if let Ok(client) = active_llm_client() {
     println!(
@@ -167,6 +170,8 @@ if let Ok(client) = active_llm_client() {
         client.llm_model_name().unwrap_or("unknown"),
     );
 }
+
+println!("uninews is budgeting {} tokens of context", llm_context_window());
 
 // Or, for a one-line label that's safe to drop into any chat message:
 println!("Extrayendo con uninews usando {}...", active_provider_label());
@@ -249,7 +254,7 @@ Options:
 
 **Integrating it with your rust project**
 
-Uninews reads the LLM provider from `UNINEWS_LLM_CLIENT` and `UNINEWS_LLM_MODEL`. If you want to override them in code (instead of via `std::env::set_var`), do it before calling `universal_scrape`. For example, to force OpenRouter with a Qwen model from inside your app:
+Uninews reads the LLM provider from `UNINEWS_LLM_CLIENT` and `UNINEWS_LLM_MODEL`, and the context-window budget from `UNINEWS_LLM_CONTEXT_WINDOW`. If you want to override them in code (instead of via `std::env::set_var`), do it before calling `universal_scrape`. For example, to force OpenRouter with a Qwen model and a 2M-token context from inside your app:
 
 ```rust
 use uninews::{universal_scrape, Post};
@@ -257,10 +262,11 @@ use uninews::{universal_scrape, Post};
 // Route Markdown conversion through OpenRouter
 std::env::set_var("UNINEWS_LLM_CLIENT", "openrouter");
 std::env::set_var("UNINEWS_LLM_MODEL", "qwen/qwen3.7-max");
+std::env::set_var("UNINEWS_LLM_CONTEXT_WINDOW", "2000000");
 std::env::set_var("OPENROUTER_API_KEY", "sk-or-...");
 
-// Scrape the URL and convert its content to Markdown in the requested language.
-let post = universal_scrape(&url, "english").await;
+// Or, for a single call, pass the context window explicitly:
+let post = universal_scrape(&url, "english", Some(2_000_000)).await;
 if !post.error.is_empty() {
     eprintln!("Error during scraping: {}", post.error);
     return;
@@ -271,8 +277,8 @@ println!("{}\n\n{}", post.title, post.content);
 ```
 
 If you only need OpenAI, just set `OPEN_AI_SECRET` once (e.g. before starting
-your process) and call `universal_scrape(url, "english")` — Uninews will pick
-it up.
+your process) and call `universal_scrape(url, "english", None)` — Uninews will
+pick it up and use the default 256K context window.
 
 Licensed under the MIT License.
 

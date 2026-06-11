@@ -20,9 +20,12 @@
 //! async fn main() {
 //!     // Make sure the env var for your chosen UNINEWS_LLM_CLIENT is set
 //!     // (OPEN_AI_SECRET by default, OPENROUTER_API_KEY for openrouter, etc.)
+//!     // Pass None to use the default 256K context window, or Some(n) to pin
+//!     // the budget for this call. Override globally via UNINEWS_LLM_CONTEXT_WINDOW.
 //!     let post = universal_scrape(
 //!         "https://example.com/article",
 //!         "english",
+//!         None,
 //!     ).await;
 //!
 //!     if post.error.is_empty() {
@@ -67,7 +70,7 @@
 //! # use uninews::universal_scrape;
 //! # #[tokio::main]
 //! # async fn main() {
-//! let post = universal_scrape("https://invalid-url-example", "english").await;
+//! let post = universal_scrape("https://invalid-url-example", "english", None).await;
 //!
 //! if !post.error.is_empty() {
 //!     match post.error.as_str() {
@@ -139,6 +142,59 @@ fn uninews_llm_model(client_name: &str) -> String {
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| default_llm_model_for(client_name).to_string())
+}
+
+/// Environment variable consulted when no explicit context window is passed
+/// to [`convert_content_to_markdown`] / [`universal_scrape`].
+pub const UNINEWS_LLM_CONTEXT_WINDOW_ENV: &str = "UNINEWS_LLM_CONTEXT_WINDOW";
+
+/// Default context window (in tokens) used when neither an explicit
+/// `context_window_tokens` argument nor the `UNINEWS_LLM_CONTEXT_WINDOW` env
+/// var provide a value. Set to 256K to comfortably cover the cleaned body of
+/// typical long-form news articles plus the Markdown-conversion system prompt
+/// and a reasonable completion budget, while staying below the 128K window of
+/// older GPT-4o-class models.
+pub const DEFAULT_LLM_CONTEXT_WINDOW: usize = 256_000;
+
+/// Read the LLM context window (in tokens) from `UNINEWS_LLM_CONTEXT_WINDOW`,
+/// falling back to [`DEFAULT_LLM_CONTEXT_WINDOW`] when unset, empty, or
+/// unparseable. A non-positive value is treated as invalid and falls back to
+/// the default.
+fn uninews_llm_context_window() -> usize {
+    match env::var(UNINEWS_LLM_CONTEXT_WINDOW_ENV)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        Some(raw) => match raw.parse::<usize>() {
+            Ok(value) if value > 0 => value,
+            Ok(_) => {
+                eprintln!(
+                    "{}: ignoring non-positive value '{}'",
+                    UNINEWS_LLM_CONTEXT_WINDOW_ENV, raw
+                );
+                DEFAULT_LLM_CONTEXT_WINDOW
+            }
+            Err(err) => {
+                eprintln!(
+                    "{}: failed to parse '{}' as usize ({}); using default {}",
+                    UNINEWS_LLM_CONTEXT_WINDOW_ENV,
+                    raw,
+                    err,
+                    DEFAULT_LLM_CONTEXT_WINDOW
+                );
+                DEFAULT_LLM_CONTEXT_WINDOW
+            }
+        },
+        None => DEFAULT_LLM_CONTEXT_WINDOW,
+    }
+}
+
+/// Resolve the effective LLM context window in tokens from an explicit
+/// override (preferred) or, when `None`, the `UNINEWS_LLM_CONTEXT_WINDOW`
+/// env var, falling back to [`DEFAULT_LLM_CONTEXT_WINDOW`].
+fn resolve_llm_context_window(context_window_tokens: Option<usize>) -> usize {
+    context_window_tokens.unwrap_or_else(uninews_llm_context_window)
 }
 
 /// Build the CloudLLM client selected by `UNINEWS_LLM_CLIENT` / `UNINEWS_LLM_MODEL`.
@@ -262,6 +318,29 @@ pub fn active_provider_label() -> String {
             format!("{} ({})", client_name, model)
         }
     }
+}
+
+/// Return the LLM context window (in tokens) Uninews will hand to the
+/// underlying `LLMSession` when no explicit `context_window_tokens`
+/// argument is passed to [`convert_content_to_markdown`] or
+/// [`universal_scrape`].
+///
+/// Precedence:
+/// 1. Explicit `context_window_tokens: Some(n)` argument (always wins).
+/// 2. `UNINEWS_LLM_CONTEXT_WINDOW` env var (parsed as `usize`).
+/// 3. [`DEFAULT_LLM_CONTEXT_WINDOW`] (256,000 tokens).
+///
+/// Invalid or non-positive env-var values fall back to
+/// [`DEFAULT_LLM_CONTEXT_WINDOW`] and a warning is written to stderr.
+///
+/// # Example
+///
+/// ```no_run
+/// use uninews::llm_context_window;
+/// println!("uninews is budgeting {} tokens of context", llm_context_window());
+/// ```
+pub fn llm_context_window() -> usize {
+    uninews_llm_context_window()
 }
 
 const BROWSER_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
@@ -1493,13 +1572,14 @@ async fn scrape_web_url_with_title_override(
     url: &str,
     language: &str,
     title_override: Option<&str>,
+    context_window_tokens: Option<usize>,
 ) -> Post {
     let scraped_post = scrape_web_url_raw_with_title_override(url, title_override).await;
     if !scraped_post.error.is_empty() {
         return scraped_post;
     }
 
-    match convert_content_to_markdown(scraped_post.clone(), language).await {
+    match convert_content_to_markdown(scraped_post.clone(), language, context_window_tokens).await {
         Ok(markdown_post) => markdown_post,
         Err(err) => Post {
             error: err,
@@ -1508,8 +1588,8 @@ async fn scrape_web_url_with_title_override(
     }
 }
 
-async fn scrape_web_url(url: &str, language: &str) -> Post {
-    scrape_web_url_with_title_override(url, language, None).await
+async fn scrape_web_url(url: &str, language: &str, context_window_tokens: Option<usize>) -> Post {
+    scrape_web_url_with_title_override(url, language, None, context_window_tokens).await
 }
 
 /// Fetches a tweet or X thread via the Twitter/X API v2 and returns a [`Post`].
@@ -1532,7 +1612,7 @@ async fn scrape_web_url(url: &str, language: &str) -> Post {
 /// # Errors
 ///
 /// All errors are non-fatal and are returned inside [`Post::error`].
-async fn scrape_x_url(url: &str, language: &str) -> Post {
+async fn scrape_x_url(url: &str, language: &str, context_window_tokens: Option<usize>) -> Post {
     // ── 1. Extract the tweet ID from the URL ─────────────────────────────────
     let tweet_id = match extract_tweet_id(url) {
         Some(id) => id,
@@ -1717,7 +1797,7 @@ async fn scrape_x_url(url: &str, language: &str) -> Post {
                 error: String::new(),
             };
 
-            return match convert_content_to_markdown(scraped_article_post.clone(), language).await {
+            return match convert_content_to_markdown(scraped_article_post.clone(), language, context_window_tokens).await {
                 Ok(markdown_post) => markdown_post,
                 Err(err) => Post {
                     error: err,
@@ -1741,6 +1821,7 @@ async fn scrape_x_url(url: &str, language: &str) -> Post {
                         return match convert_content_to_markdown(
                             scraped_article_post.clone(),
                             language,
+                            context_window_tokens,
                         )
                         .await
                         {
@@ -1756,6 +1837,7 @@ async fn scrape_x_url(url: &str, language: &str) -> Post {
                             &article_url,
                             language,
                             article_title_override,
+                            context_window_tokens,
                         )
                         .await;
                         if article_post.error.is_empty() {
@@ -1777,9 +1859,13 @@ async fn scrape_x_url(url: &str, language: &str) -> Post {
                 }
             }
 
-            let article_post =
-                scrape_web_url_with_title_override(&article_url, language, article_title_override)
-                    .await;
+            let article_post = scrape_web_url_with_title_override(
+                &article_url,
+                language,
+                article_title_override,
+                context_window_tokens,
+            )
+            .await;
             if article_post.error.is_empty() {
                 return article_post;
             }
@@ -1869,7 +1955,7 @@ async fn scrape_x_url(url: &str, language: &str) -> Post {
     };
 
     // ── 7. AI Markdown conversion & optional translation ──────────────────────
-    match convert_content_to_markdown(scraped_post.clone(), language).await {
+    match convert_content_to_markdown(scraped_post.clone(), language, context_window_tokens).await {
         Ok(markdown_post) => markdown_post,
         Err(err) => Post {
             error: err,
@@ -1896,6 +1982,11 @@ async fn scrape_x_url(url: &str, language: &str) -> Post {
 ///
 /// - `post`: The scraped Post with raw HTML content
 /// - `language`: Target language for output (e.g., "spanish", "french", "japanese")
+/// - `context_window_tokens`: Optional explicit LLM context window (in tokens).
+///   When `Some(n)`, `n` is used as the `LLMSession` budget for the Markdown
+///   conversion. When `None`, Uninews reads `UNINEWS_LLM_CONTEXT_WINDOW`
+///   (parsed as `usize`); if that env var is also unset, empty, or unparseable,
+///   it falls back to [`DEFAULT_LLM_CONTEXT_WINDOW`] (256,000 tokens).
 ///
 /// # Returns
 ///
@@ -1910,6 +2001,9 @@ async fn scrape_x_url(url: &str, language: &str) -> Post {
 ///   each client falls back to a built-in default (e.g. `gpt-5.5` for `openai`,
 ///   `openai/gpt-5.5` for `openrouter`). For OpenRouter you usually want a
 ///   `vendor/model` slug (e.g. `qwen/qwen3.7-max`).
+/// - `UNINEWS_LLM_CONTEXT_WINDOW` - Optional LLM context-window budget (in
+///   tokens) used when `context_window_tokens` is `None`. Falls back to
+///   [`DEFAULT_LLM_CONTEXT_WINDOW`] when unset or unparseable.
 /// - One provider-specific API key env var is required:
 ///   - `openai`     → `OPEN_AI_SECRET`
 ///   - `openrouter` → `OPENROUTER_API_KEY`
@@ -1942,7 +2036,8 @@ async fn scrape_x_url(url: &str, language: &str) -> Post {
 ///     };
 ///
 ///     // Convert with the provider selected via UNINEWS_LLM_CLIENT (default: openai / gpt-5.5)
-///     match convert_content_to_markdown(post, "english").await {
+///     // and the default 256K context window.
+///     match convert_content_to_markdown(post, "english", None).await {
 ///         Ok(markdown_post) => println!("{}", markdown_post.content),
 ///         Err(e) => eprintln!("Conversion failed: {}", e),
 ///     }
@@ -1958,18 +2053,26 @@ async fn scrape_x_url(url: &str, language: &str) -> Post {
 /// - And many more...
 ///
 /// If the specified language is not recognized, the output defaults to English.
-pub async fn convert_content_to_markdown(mut post: Post, language: &str) -> Result<Post, String> {
+pub async fn convert_content_to_markdown(
+    mut post: Post,
+    language: &str,
+    context_window_tokens: Option<usize>,
+) -> Result<Post, String> {
     // Build the CloudLLM client selected by UNINEWS_LLM_CLIENT / UNINEWS_LLM_MODEL.
     let client = build_uninews_llm_client()?;
 
     // Normalize language: if empty, default to "english".
     let lang = normalized_output_language(language);
 
+    // Resolve the LLM context window: explicit override wins, then the env
+    // var, then DEFAULT_LLM_CONTEXT_WINDOW. See `resolve_llm_context_window`.
+    let context_window = resolve_llm_context_window(context_window_tokens);
+
     // Define a system prompt that instructs the LLM on its role.
     let system_prompt = markdown_system_prompt(lang);
 
     // Create a new LLMSession.
-    let mut session = LLMSession::new(client, system_prompt, 1000000);
+    let mut session = LLMSession::new(client, system_prompt, context_window);
 
     // Serialize the entire Post to JSON.
     let post_json = serde_json::to_string(&post)
@@ -2006,6 +2109,10 @@ pub async fn convert_content_to_markdown(mut post: Post, language: &str) -> Resu
 ///
 /// - `url`: The URL of the article to scrape (must be a complete, valid URL)
 /// - `language`: Target language for output ("english", "spanish", "french", etc.)
+/// - `context_window_tokens`: Optional LLM context window (in tokens) passed
+///   through to [`convert_content_to_markdown`]. When `None`, Uninews reads
+///   `UNINEWS_LLM_CONTEXT_WINDOW`; if that env var is also unset or unparseable,
+///   it falls back to [`DEFAULT_LLM_CONTEXT_WINDOW`] (256,000 tokens).
 ///
 /// # Returns
 ///
@@ -2023,8 +2130,9 @@ pub async fn convert_content_to_markdown(mut post: Post, language: &str) -> Resu
 /// # Environment Variables
 ///
 /// See [`convert_content_to_markdown`] for the full list of supported
-/// `UNINEWS_LLM_CLIENT` / `UNINEWS_LLM_MODEL` values and the
-/// provider-specific API key env vars.
+/// `UNINEWS_LLM_CLIENT` / `UNINEWS_LLM_MODEL` /
+/// `UNINEWS_LLM_CONTEXT_WINDOW` values and the provider-specific API key
+/// env vars.
 ///
 /// # Performance Considerations
 ///
@@ -2049,10 +2157,11 @@ pub async fn convert_content_to_markdown(mut post: Post, language: &str) -> Resu
 /// # use uninews::universal_scrape;
 /// #[tokio::main]
 /// async fn main() {
-///     // Scrape with default English output
+///     // Scrape with default English output and the default 256K context window.
 ///     let post = universal_scrape(
 ///         "https://www.example.com/news/article",
 ///         "english",
+///         None,
 ///     ).await;
 ///
 ///     if post.error.is_empty() {
@@ -2077,6 +2186,7 @@ pub async fn convert_content_to_markdown(mut post: Post, language: &str) -> Resu
 ///     let post = universal_scrape(
 ///         "https://www.bbc.com/news/article",
 ///         "spanish",
+///         None,
 ///     ).await;
 ///
 ///     if post.error.is_empty() {
@@ -2098,6 +2208,29 @@ pub async fn convert_content_to_markdown(mut post: Post, language: &str) -> Resu
 /// # //   export OPENROUTER_API_KEY=sk-or-...
 /// ```
 ///
+/// ## Pinning the Context Window
+///
+/// Pass an explicit `Some(n)` to override `UNINEWS_LLM_CONTEXT_WINDOW` and
+/// the [`DEFAULT_LLM_CONTEXT_WINDOW`] fallback for a single call. Useful when
+/// the underlying model advertises a larger window than the env var
+/// suggests (e.g. switching to Gemini-class 1M+ context for very long
+/// articles).
+///
+/// ```rust,no_run
+/// # use uninews::universal_scrape;
+/// #[tokio::main]
+/// async fn main() {
+///     let post = universal_scrape(
+///         "https://example.com/very-long-article",
+///         "english",
+///         Some(2_000_000), // 2M tokens
+///     ).await;
+///     if post.error.is_empty() {
+///         println!("{}", post.content);
+///     }
+/// }
+/// ```
+///
 /// # Real-World Example: Building an RSS Reader
 ///
 /// ```rust,no_run
@@ -2110,7 +2243,7 @@ pub async fn convert_content_to_markdown(mut post: Post, language: &str) -> Resu
 ///     ];
 ///
 ///     for url in article_urls {
-///         let post = universal_scrape(url, "english").await;
+///         let post = universal_scrape(url, "english", None).await;
 ///
 ///         if post.error.is_empty() {
 ///             // Successfully processed
@@ -2139,12 +2272,12 @@ pub async fn convert_content_to_markdown(mut post: Post, language: &str) -> Resu
 /// - JavaScript-heavy single-page apps (content loaded dynamically)
 /// - Paywalled content
 /// - Sites with aggressive anti-scraping measures
-pub async fn universal_scrape(url: &str, language: &str) -> Post {
+pub async fn universal_scrape(url: &str, language: &str, context_window_tokens: Option<usize>) -> Post {
     // Delegate to the X.com handler for X / Twitter URLs.
     if is_x_url(url) {
-        return scrape_x_url(url, language).await;
+        return scrape_x_url(url, language, context_window_tokens).await;
     }
-    scrape_web_url(url, language).await
+    scrape_web_url(url, language, context_window_tokens).await
 }
 
 #[cfg(test)]
@@ -2431,5 +2564,104 @@ mod tests {
             .contains("Do not summarize, paraphrase, compress, or omit substantive details"));
         assert!(user_prompt.contains("Treat `content` as the canonical article body"));
         assert!(user_prompt.contains("keep it nearly verbatim"));
+    }
+
+    // ── LLM context window env-var resolution ───────────────────────────────
+
+    /// RAII helper: temporarily override an env var, restore on drop.
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            // `std::env::set_var` is unsafe in edition 2024 / newer Rust; uninews
+            // is edition 2021 so the unsafe block is the conventional wrapper.
+            let previous = env::var(key).ok();
+            unsafe {
+                env::set_var(key, value);
+            }
+            Self { key, previous }
+        }
+
+        fn unset(key: &'static str) -> Self {
+            let previous = env::var(key).ok();
+            unsafe {
+                env::remove_var(key);
+            }
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match self.previous.as_deref() {
+                    Some(previous) => env::set_var(self.key, previous),
+                    None => env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_default_llm_context_window_constant_is_256k() {
+        assert_eq!(DEFAULT_LLM_CONTEXT_WINDOW, 256_000);
+    }
+
+    #[test]
+    fn test_uninews_llm_context_window_falls_back_to_default_when_unset() {
+        let _guard = EnvVarGuard::unset(UNINEWS_LLM_CONTEXT_WINDOW_ENV);
+        assert_eq!(uninews_llm_context_window(), DEFAULT_LLM_CONTEXT_WINDOW);
+        assert_eq!(llm_context_window(), DEFAULT_LLM_CONTEXT_WINDOW);
+    }
+
+    #[test]
+    fn test_uninews_llm_context_window_falls_back_to_default_when_empty() {
+        let _guard = EnvVarGuard::set(UNINEWS_LLM_CONTEXT_WINDOW_ENV, "   ");
+        assert_eq!(uninews_llm_context_window(), DEFAULT_LLM_CONTEXT_WINDOW);
+    }
+
+    #[test]
+    fn test_uninews_llm_context_window_parses_valid_positive_value() {
+        let _guard = EnvVarGuard::set(UNINEWS_LLM_CONTEXT_WINDOW_ENV, "2000000");
+        assert_eq!(uninews_llm_context_window(), 2_000_000);
+    }
+
+    #[test]
+    fn test_uninews_llm_context_window_trims_whitespace_around_value() {
+        let _guard = EnvVarGuard::set(UNINEWS_LLM_CONTEXT_WINDOW_ENV, "  128000 \n");
+        assert_eq!(uninews_llm_context_window(), 128_000);
+    }
+
+    #[test]
+    fn test_uninews_llm_context_window_falls_back_to_default_on_unparseable() {
+        let _guard = EnvVarGuard::set(UNINEWS_LLM_CONTEXT_WINDOW_ENV, "two-million");
+        assert_eq!(uninews_llm_context_window(), DEFAULT_LLM_CONTEXT_WINDOW);
+    }
+
+    #[test]
+    fn test_uninews_llm_context_window_falls_back_to_default_on_zero() {
+        let _guard = EnvVarGuard::set(UNINEWS_LLM_CONTEXT_WINDOW_ENV, "0");
+        assert_eq!(uninews_llm_context_window(), DEFAULT_LLM_CONTEXT_WINDOW);
+    }
+
+    #[test]
+    fn test_resolve_llm_context_window_explicit_override_wins() {
+        let _guard = EnvVarGuard::set(UNINEWS_LLM_CONTEXT_WINDOW_ENV, "1000");
+        assert_eq!(resolve_llm_context_window(Some(2_000_000)), 2_000_000);
+    }
+
+    #[test]
+    fn test_resolve_llm_context_window_uses_env_when_none() {
+        let _guard = EnvVarGuard::set(UNINEWS_LLM_CONTEXT_WINDOW_ENV, "500000");
+        assert_eq!(resolve_llm_context_window(None), 500_000);
+    }
+
+    #[test]
+    fn test_resolve_llm_context_window_uses_default_when_none_and_env_unset() {
+        let _guard = EnvVarGuard::unset(UNINEWS_LLM_CONTEXT_WINDOW_ENV);
+        assert_eq!(resolve_llm_context_window(None), DEFAULT_LLM_CONTEXT_WINDOW);
     }
 }
