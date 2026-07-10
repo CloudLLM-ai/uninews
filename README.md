@@ -109,7 +109,7 @@ third:
 | Variable | Default | Description |
 |---|---|---|
 | `UNINEWS_LLM_CLIENT` | `openai` | One of `openai`, `openrouter`, `grok`, `gemini`, `claude`. |
-| `UNINEWS_LLM_MODEL`  | per-client | Free-form model slug. If unset, each client falls back to the default listed in the table below (e.g. `gpt-5.5` for `openai`, `openai/gpt-5.5` for `openrouter`). For OpenRouter you usually want a `vendor/model` slug (e.g. `qwen/qwen3.7-max`). |
+| `UNINEWS_LLM_MODEL`  | per-client | Free-form model slug. If unset, each client falls back to the default listed in the table below (e.g. `gpt-5.6-sol` for `openai`, `openai/gpt-5.6-sol` for `openrouter`). For OpenRouter you usually want a `vendor/model` slug (e.g. `qwen/qwen3.7-max`). |
 | `UNINEWS_LLM_CONTEXT_WINDOW` | `256000` | LLM context-window budget (in tokens) used by `LLMSession` while formatting the Markdown. Bump this when the model you point at via `UNINEWS_LLM_MODEL` supports a larger context (e.g. Gemini-class 1M+ models) or a longer article blows past the default. Library callers can also pass `Some(n)` to `universal_scrape` / `convert_content_to_markdown` to override per call; the explicit argument always wins. Invalid or non-positive values fall back to the default. |
 
 Each provider reads its API key from a dedicated env var. Only the one matching
@@ -119,9 +119,9 @@ need to override `UNINEWS_LLM_MODEL` when you want a different model.
 
 | `UNINEWS_LLM_CLIENT` | API key env var | Default model when `UNINEWS_LLM_MODEL` is unset |
 |---|---|---|
-| `openai`     | `OPEN_AI_SECRET`     | `gpt-5.5` |
-| `openrouter` | `OPENROUTER_API_KEY` | `openai/gpt-5.5` (a `vendor/model` slug) |
-| `grok`       | `XAI_API_KEY`        | `grok-4.3` |
+| `openai`     | `OPEN_AI_SECRET`     | `gpt-5.6-sol` |
+| `openrouter` | `OPENROUTER_API_KEY` | `openai/gpt-5.6-sol` (a `vendor/model` slug) |
+| `grok`       | `XAI_API_KEY`        | `grok-4.5` |
 | `gemini`     | `GEMINI_API_KEY`     | `gemini-3.5-flash` |
 | `claude`     | `CLAUDE_API_KEY`     | `claude-opus-4.7-fast` |
 

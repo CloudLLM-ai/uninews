@@ -1,3 +1,16 @@
+0.43.0 JUL/10/2026
+- Bump `cloudllm` 0.15.7 → **0.15.10** (GPT-5.6 Sol/Terra/Luna + Grok 4.5 enums,
+  MentisDB 0.10, openai-rust2 ≥ 1.7.6).
+- Update default models when `UNINEWS_LLM_MODEL` is unset:
+  - openai → `gpt-5.6-sol` (was `gpt-5.5`)
+  - openrouter → `openai/gpt-5.6-sol` (was `openai/gpt-5.5`)
+  - grok → `grok-4.5` (was `grok-4.3`)
+- Prefer cloudllm strong-typed constructors for the stock OpenAI GPT-5.6
+  Sol/Terra/Luna aliases and Grok 4.5 / 4.5-latest; arbitrary slugs still use
+  the string constructors.
+- Refresh README provider table and rustdoc defaults to match.
+- Clippy-clean under `make clippy` (`-D warnings`).
+
 0.42.1
 - Add an optional `context_window_tokens: Option<usize>` parameter to `convert_content_to_markdown` and `universal_scrape` so callers can pin the LLM context-window budget per call without touching env vars.
 - When the new parameter is `None`, the budget is read from the new `UNINEWS_LLM_CONTEXT_WINDOW` env var; invalid or non-positive values fall back to the new `DEFAULT_LLM_CONTEXT_WINDOW` (256,000 tokens) with a warning to stderr. Embedders (e.g. diariobitcoin's `dbtc_canuto`) can therefore tune the budget at runtime via the canuto properties file using the existing `UNINEWS_LLM_*` env-var bridge.

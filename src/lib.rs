@@ -99,7 +99,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use cloudllm::client_wrapper::{ClientWrapper, Role};
 use cloudllm::clients::claude::ClaudeClient;
 use cloudllm::clients::gemini::GeminiClient;
-use cloudllm::clients::grok::GrokClient;
+use cloudllm::clients::grok::{GrokClient, Model as GrokModel};
 use cloudllm::clients::openai::{Model as OpenAIModel, OpenAIClient};
 use cloudllm::clients::openrouter::OpenRouterClient;
 use cloudllm::LLMSession;
@@ -113,13 +113,16 @@ const DEFAULT_LLM_CLIENT: &str = "openai";
 /// "Supported providers".
 fn default_llm_model_for(client_name: &str) -> &'static str {
     match client_name {
-        "openai" => "gpt-5.5",
-        "openrouter" => "openai/gpt-5.5",
-        "grok" => "grok-4.3",
+        // GPT-5.6 Sol is the flagship OpenAI chat model (cloudllm Model::GPT56Sol).
+        "openai" => "gpt-5.6-sol",
+        // OpenRouter slug for the same family (alias gpt-5.6 also works upstream).
+        "openrouter" => "openai/gpt-5.6-sol",
+        // Grok 4.5 is xAI's frontier chat model (cloudllm Model::Grok45).
+        "grok" => "grok-4.5",
         "gemini" => "gemini-3.5-flash",
         "claude" => "claude-opus-4.7-fast",
         // Fall back to OpenAI's default for any future/unknown client name.
-        _ => "gpt-5.5",
+        _ => "gpt-5.6-sol",
     }
 }
 
@@ -184,10 +187,7 @@ pub fn uninews_llm_context_window() -> usize {
             Err(err) => {
                 eprintln!(
                     "{}: failed to parse '{}' as usize ({}); using default {}",
-                    UNINEWS_LLM_CONTEXT_WINDOW_ENV,
-                    raw,
-                    err,
-                    DEFAULT_LLM_CONTEXT_WINDOW
+                    UNINEWS_LLM_CONTEXT_WINDOW_ENV, raw, err, DEFAULT_LLM_CONTEXT_WINDOW
                 );
                 DEFAULT_LLM_CONTEXT_WINDOW
             }
@@ -228,16 +228,22 @@ fn build_uninews_llm_client() -> Result<Arc<dyn ClientWrapper>, String> {
         "openai" => {
             let key = env::var("OPEN_AI_SECRET")
                 .map_err(|_| "Please set the OPEN_AI_SECRET environment variable.".to_string())?;
-            // Use the enum-based constructor when the model string matches the
-            // built-in GPT55 default; this keeps the strong-typed path warm.
-            if model == "gpt-5.5" {
-                Ok(Arc::new(OpenAIClient::new_with_model_enum(
-                    &key,
-                    OpenAIModel::GPT55,
-                )))
-            } else {
-                Ok(Arc::new(OpenAIClient::new_with_model_string(&key, &model)))
-            }
+            // Prefer strong-typed enums for the stock defaults; any other slug
+            // falls through to the string constructor (escape hatch).
+            let client = match model.as_str() {
+                "gpt-5.6-sol" => {
+                    OpenAIClient::new_with_model_enum(&key, OpenAIModel::GPT56Sol)
+                }
+                "gpt-5.6" => OpenAIClient::new_with_model_enum(&key, OpenAIModel::GPT56),
+                "gpt-5.6-terra" => {
+                    OpenAIClient::new_with_model_enum(&key, OpenAIModel::GPT56Terra)
+                }
+                "gpt-5.6-luna" => {
+                    OpenAIClient::new_with_model_enum(&key, OpenAIModel::GPT56Luna)
+                }
+                other => OpenAIClient::new_with_model_string(&key, other),
+            };
+            Ok(Arc::new(client))
         }
         "openrouter" => {
             let key = env::var("OPENROUTER_API_KEY").map_err(|_| {
@@ -250,7 +256,14 @@ fn build_uninews_llm_client() -> Result<Arc<dyn ClientWrapper>, String> {
         "grok" => {
             let key = env::var("XAI_API_KEY")
                 .map_err(|_| "Please set the XAI_API_KEY environment variable.".to_string())?;
-            Ok(Arc::new(GrokClient::new_with_model_str(&key, &model)))
+            let client = match model.as_str() {
+                "grok-4.5" => GrokClient::new_with_model_enum(&key, GrokModel::Grok45),
+                "grok-4.5-latest" => {
+                    GrokClient::new_with_model_enum(&key, GrokModel::Grok45Latest)
+                }
+                other => GrokClient::new_with_model_str(&key, other),
+            };
+            Ok(Arc::new(client))
         }
         "gemini" => {
             let key = env::var("GEMINI_API_KEY")
@@ -303,7 +316,7 @@ pub fn active_llm_client() -> Result<Arc<dyn ClientWrapper>, String> {
 }
 
 /// Return a one-line, human-readable label for the active LLM
-/// (`"OpenAI (gpt-5.5)"`, `"OpenRouter (qwen/qwen3.7-max)"`, …).
+/// (`"OpenAI (gpt-5.6-sol)"`, `"OpenRouter (qwen/qwen3.7-max)"`, …).
 ///
 /// Built from the live `Arc<dyn ClientWrapper>` via the `LLMClientInfo`
 /// trait (cloudllm 0.15.7+), so it always reflects whatever
@@ -1809,7 +1822,13 @@ async fn scrape_x_url(url: &str, language: &str, context_window_tokens: Option<u
                 error: String::new(),
             };
 
-            return match convert_content_to_markdown(scraped_article_post.clone(), language, context_window_tokens).await {
+            return match convert_content_to_markdown(
+                scraped_article_post.clone(),
+                language,
+                context_window_tokens,
+            )
+            .await
+            {
                 Ok(markdown_post) => markdown_post,
                 Err(err) => Post {
                     error: err,
@@ -2010,8 +2029,8 @@ async fn scrape_x_url(url: &str, language: &str, context_window_tokens: Option<u
 /// - `UNINEWS_LLM_CLIENT` - Provider to use. Defaults to `openai`. Allowed:
 ///   `openai`, `openrouter`, `grok`, `gemini`, `claude`.
 /// - `UNINEWS_LLM_MODEL`  - Model slug forwarded to the provider. If unset,
-///   each client falls back to a built-in default (e.g. `gpt-5.5` for `openai`,
-///   `openai/gpt-5.5` for `openrouter`). For OpenRouter you usually want a
+///   each client falls back to a built-in default (e.g. `gpt-5.6-sol` for `openai`,
+///   `openai/gpt-5.6-sol` for `openrouter`). For OpenRouter you usually want a
 ///   `vendor/model` slug (e.g. `qwen/qwen3.7-max`).
 /// - `UNINEWS_LLM_CONTEXT_WINDOW` - Optional LLM context-window budget (in
 ///   tokens) used when `context_window_tokens` is `None`. Falls back to
@@ -2047,7 +2066,7 @@ async fn scrape_x_url(url: &str, language: &str, context_window_tokens: Option<u
 ///         error: String::new(),
 ///     };
 ///
-///     // Convert with the provider selected via UNINEWS_LLM_CLIENT (default: openai / gpt-5.5)
+///     // Convert with the provider selected via UNINEWS_LLM_CLIENT (default: openai / gpt-5.6-sol)
 ///     // and the default 256K context window.
 ///     match convert_content_to_markdown(post, "english", None).await {
 ///         Ok(markdown_post) => println!("{}", markdown_post.content),
@@ -2284,7 +2303,11 @@ pub async fn convert_content_to_markdown(
 /// - JavaScript-heavy single-page apps (content loaded dynamically)
 /// - Paywalled content
 /// - Sites with aggressive anti-scraping measures
-pub async fn universal_scrape(url: &str, language: &str, context_window_tokens: Option<usize>) -> Post {
+pub async fn universal_scrape(
+    url: &str,
+    language: &str,
+    context_window_tokens: Option<usize>,
+) -> Post {
     // Delegate to the X.com handler for X / Twitter URLs.
     if is_x_url(url) {
         return scrape_x_url(url, language, context_window_tokens).await;
