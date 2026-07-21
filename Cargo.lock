@@ -5640,7 +5640,7 @@ checksum = "39ec24b3121d976906ece63c9daad25b85969647682eee313cb5779fdd69e14e"
 
 [[package]]
 name = "uninews"
-version = "0.43.0"
+version = "0.44.0"
 dependencies = [
  "clap",
  "cloudllm",
