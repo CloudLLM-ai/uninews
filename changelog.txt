@@ -1,3 +1,6 @@
+0.44.0 UNRELEASED
+- (work in progress)
+
 0.43.0 JUL/10/2026
 - Bump `cloudllm` 0.15.7 → **0.15.10** (GPT-5.6 Sol/Terra/Luna + Grok 4.5 enums,
   MentisDB 0.10, openai-rust2 ≥ 1.7.6).
