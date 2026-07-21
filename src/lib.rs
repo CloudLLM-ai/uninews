@@ -11,6 +11,8 @@
 //! - **Multilingual Support**: Translates content to any language during processing
 //! - **Progress Events**: Optional single-listener event stream ([`events`]) for
 //!   live scraping feedback in agents, harnesses, and UIs
+//! - **archive.org Fallback**: Automatically retries bot-protected or unreachable
+//!   pages via the latest Wayback Machine snapshot ([`archive`])
 //! - **Async/Await**: Built with Tokio for efficient async operations
 //!
 //! ## Quick Start
@@ -72,6 +74,10 @@
 //! - `x` — X.com / Twitter tweets, threads, and articles.
 //! - `html` — HTML cleaning and metadata extraction.
 //! - `browser` — headless-Chrome rendering fallback.
+//! - [`archive`] — archive.org Wayback Machine fallback for protected or
+//!   unreachable pages.
+//! - [`events`] — typed progress events with a single-listener emitter.
+//! - `http` — shared, timeout-hardened `reqwest` clients.
 //! - `util` — small shared helpers.
 //!
 //! ## Security Notes
@@ -109,6 +115,7 @@
 //! # }
 //! ```
 
+pub mod archive;
 mod browser;
 pub mod events;
 #[doc(hidden)]
@@ -122,6 +129,7 @@ pub mod x;
 
 use serde::Serialize;
 
+pub use archive::{archive_fallback_enabled, ArchiveSnapshot, UNINEWS_ARCHIVE_FALLBACK_ENV};
 pub use events::{set_event_listener, ScrapeEvent, ScrapeEventListener};
 pub use llm::{
     active_llm_client, active_provider_label, convert_content_to_markdown, llm_context_window,

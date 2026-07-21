@@ -19,6 +19,15 @@
   callers by design — see module docs). Events serialize to JSON with a
   snake_case `event` tag. Panicking listeners are caught and never abort a
   scrape.
+- New `archive` module: archive.org Wayback Machine fallback for pages that
+  cannot be scraped directly. Triggers on bot-protection walls (Cloudflare
+  challenge/interstitial markers, 401/403/429 with Cloudflare headers) and
+  hard failures (connection errors, timeouts, 5xx). Looks up the latest
+  snapshot via the Wayback availability API and scrapes it instead.
+  Enabled by default; disable with `UNINEWS_ARCHIVE_FALLBACK=0`. Every step
+  emits the matching `ScrapeEvent`s; X URLs keep their own fallback chain.
+  Includes an end-to-end test that serves a Cloudflare-style 403 challenge
+  from a loopback server and asserts the full fallback + event sequence.
 
 0.43.0 JUL/10/2026
 - Bump `cloudllm` 0.15.7 → **0.15.10** (GPT-5.6 Sol/Terra/Luna + Grok 4.5 enums,
