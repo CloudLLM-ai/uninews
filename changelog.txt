@@ -28,6 +28,13 @@
   emits the matching `ScrapeEvent`s; X URLs keep their own fallback chain.
   Includes an end-to-end test that serves a Cloudflare-style 403 challenge
   from a loopback server and asserts the full fallback + event sequence.
+- Extraction quality: when a page contains several `<article>` elements
+  (main story + teaser cards), the scraper now keeps the *longest* cleaned
+  article instead of the first. Verified live against a Cloudflare-protected
+  theblock.co article served through the Wayback fallback (extracted body
+  went from a 243-byte teaser to the full 9.4KB story).
+- New `examples/scrape_with_events.rs`: scrape a URL while printing live
+  `ScrapeEvent`s to stderr — reference implementation for listener users.
 
 0.43.0 JUL/10/2026
 - Bump `cloudllm` 0.15.7 → **0.15.10** (GPT-5.6 Sol/Terra/Luna + Grok 4.5 enums,

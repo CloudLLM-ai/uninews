@@ -115,7 +115,10 @@ fn clean_element(element: ElementRef, skip_tags: &[&str]) -> String {
 ///
 /// # Strategy
 ///
-/// 1. **Priority**: Try to find and clean an `<article>` element
+/// 1. **Priority**: Clean every `<article>` element and keep the longest
+///    result — news pages frequently contain several `<article>` elements
+///    (the main story plus teaser/related-story cards), and the main story
+///    is almost always the largest.
 /// 2. **Fallback**: If no article found, use the entire `<body>` element
 /// 3. **Cleaning**: Apply the same tag filtering and whitespace removal as `clean_element`
 ///
@@ -138,14 +141,16 @@ fn extract_clean_content(document: &Html, skip_tags: &[&str]) -> String {
     static ARTICLE_SELECTOR: OnceLock<Selector> = OnceLock::new();
     static BODY_SELECTOR: OnceLock<Selector> = OnceLock::new();
 
-    if let Some(article) = document
+    // Clean every <article> and keep the longest: pages often contain
+    // several (main story + teaser cards), and the main story is the
+    // largest. Picking the first match would sometimes return a teaser.
+    let best_article = document
         .select(cached_selector(&ARTICLE_SELECTOR, "article"))
-        .next()
-    {
-        let cleaned = clean_element(article, skip_tags);
-        if !cleaned.trim().is_empty() {
-            return cleaned;
-        }
+        .map(|article| clean_element(article, skip_tags))
+        .filter(|cleaned| !cleaned.trim().is_empty())
+        .max_by_key(|cleaned| cleaned.len());
+    if let Some(content) = best_article {
+        return content;
     }
 
     // Fallback: use the <body>
