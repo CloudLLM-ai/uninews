@@ -38,8 +38,38 @@ Options:
 - **Scraping & Cleaning:** Extracts the main content of a news article by targeting the `<article>` tag (or falling back to `<body>`) and removing unwanted elements.
 - **Markdown Conversion:** Uses the [CloudLLM](https://github.com/CloudLLM-ai/cloudllm/tree/main) Rust API to convert the cleaned HTML content into near-lossless Markdown. The LLM provider is pluggable via env vars (see [LLM Providers](#llm-providers)).
 - **X.com / Twitter Support:** Reads individual tweets and full X threads via the X API v2, assembling the thread chronologically before converting it to Markdown.
+- **archive.org Fallback:** Pages behind bot-protection walls (Cloudflare & co.) or failing outright (network errors, 5xx) are automatically retried via the latest Wayback Machine snapshot. Enabled by default; set `UNINEWS_ARCHIVE_FALLBACK=0` to disable. See [archive.org Fallback](#archiveorg-fallback).
+- **Progress Events:** Library users can register a single process-wide listener to receive typed `ScrapeEvent`s for every pipeline step — ideal for agents, harnesses, and UIs that need live feedback. See [Progress Events](#progress-events).
 - **Reusable Library:** The `universal_scrape` function is exposed for easy integration into other Rust projects.
 - **Multilanguage Support:** The `universal_scrape` function accepts an optional language parameter to specify the language of the article to scrape, otherwise it defaults to English.
+
+## Progress Events
+
+Register one process-wide listener with `set_event_listener` and every step of the pipeline is reported as a typed `ScrapeEvent`:
+
+```rust
+use std::sync::Arc;
+use uninews::{set_event_listener, universal_scrape, ScrapeEvent};
+
+set_event_listener(Some(Arc::new(|event: &ScrapeEvent| {
+    eprintln!("uninews: {:?}", event);
+})));
+
+let post = universal_scrape("https://example.com/article", "english", None).await;
+```
+
+Events cover scrape start/completion/failure, fetch start/success/failure, content extraction, bot-protection detection, the archive.org fallback, and LLM conversion. They serialize to JSON with a snake_case `event` tag (`"fetch_succeeded"`, `"archive_snapshot_found"`, …).
+
+Only **one** listener is supported by design; if you need several consumers, register a closure that multiplexes to your own subscribers (see the `events` module docs). A runnable reference implementation lives in [`examples/scrape_with_events.rs`](examples/scrape_with_events.rs).
+
+## archive.org Fallback
+
+When a page cannot be scraped directly, uninews asks the [Wayback Machine](https://archive.org/web/) for the latest snapshot of the URL and scrapes that instead. The fallback triggers on:
+
+- **Bot-protection walls** — Cloudflare challenge pages ("Just a moment…"), JavaScript-required interstitials, and `401`/`403`/`429` responses served by Cloudflare.
+- **Hard failures** — connection errors, timeouts, and `5xx` server errors.
+
+It is **enabled by default**; set `UNINEWS_ARCHIVE_FALLBACK=0` (or `false`/`no`/`off`) to disable it. Every step is reported through the event stream (`ArchiveFallbackStarted`, `ArchiveSnapshotFound`, `ArchiveSnapshotNotFound`), and if the fallback also fails, the final `Post::error` explains what happened.
 
 ## Installation
 
