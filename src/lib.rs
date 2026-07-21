@@ -72,6 +72,20 @@
 //! - `browser` — headless-Chrome rendering fallback.
 //! - `util` — small shared helpers.
 //!
+//! ## Security Notes
+//!
+//! - **SSRF**: [`universal_scrape`] fetches arbitrary caller-supplied URLs.
+//!   If you expose it behind a service, validate/allow-list URLs yourself —
+//!   uninews intentionally does not restrict schemes or hosts.
+//! - **Secrets**: API keys are only read from environment variables and are
+//!   never written to logs, stderr, or [`Post`] fields.
+//! - **Trusted env vars**: `UNINEWS_CHROME_BINARY` names an executable that
+//!   gets spawned; only set it to a binary you trust. Target URLs are passed
+//!   to Chrome as plain process arguments (no shell), so they cannot inject
+//!   commands.
+//! - **Availability**: all HTTP requests run with connect/read timeouts (see
+//!   the `http` module) so a hung server cannot block a scrape forever.
+//!
 //! ## Error Handling
 //!
 //! Errors are non-fatal and returned in the [`Post::error`] field. Always check this field:
@@ -96,6 +110,7 @@
 mod browser;
 #[doc(hidden)]
 pub mod html;
+mod http;
 pub mod llm;
 mod util;
 mod web;

@@ -9,13 +9,12 @@
 //! 3. LLM Markdown conversion of the extracted body ([`crate::llm`]).
 
 use std::error::Error as StdError;
-
-use reqwest::Client;
+use std::fmt::Write as _;
 
 use crate::browser::fetch_rendered_dom_with_chrome;
 use crate::html::parse_scraped_post_from_html;
+use crate::http::web_client;
 use crate::llm::convert_content_to_markdown;
-use crate::util::BROWSER_USER_AGENT;
 use crate::x::{
     is_x_article_url, x_article_body_unavailable, x_debug_dump, x_debug_dump_http_response,
 };
@@ -28,30 +27,27 @@ use crate::Post;
 /// X Article URLs whose guest HTML withholds the body, a headless-Chrome
 /// render is attempted before giving up.
 async fn scrape_web_url_raw_with_title_override(url: &str, title_override: Option<&str>) -> Post {
-    let client = Client::builder()
-        .user_agent(BROWSER_USER_AGENT)
-        .http1_only()
-        .build()
-        .unwrap_or_default();
-    let response = client.get(url).send().await;
-
-    if let Err(err) = response {
-        let mut msg = format!("Failed to fetch URL: {}", err);
-        let mut src: Option<&dyn StdError> = err.source();
-        while let Some(cause) = src {
-            msg.push_str(&format!(" => {}", cause));
-            src = cause.source();
+    let response = match web_client().get(url).send().await {
+        Ok(response) => response,
+        Err(err) => {
+            // Walk the full error source chain so DNS/TLS/proxy causes are
+            // visible in the final message.
+            let mut msg = format!("Failed to fetch URL: {}", err);
+            let mut src: Option<&dyn StdError> = err.source();
+            while let Some(cause) = src {
+                let _ = write!(msg, " => {}", cause);
+                src = cause.source();
+            }
+            return Post {
+                title: "".into(),
+                content: "".into(),
+                featured_image_url: "".into(),
+                publication_date: None,
+                author: None,
+                error: msg,
+            };
         }
-        return Post {
-            title: "".into(),
-            content: "".into(),
-            featured_image_url: "".into(),
-            publication_date: None,
-            author: None,
-            error: msg,
-        };
-    }
-    let response = response.unwrap();
+    };
     let response_url = response.url().to_string();
     let is_x_article = is_x_article_url(&response_url) || is_x_article_url(url);
     let response_status = response.status();

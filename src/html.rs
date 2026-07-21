@@ -5,12 +5,31 @@
 //! (scripts, ads, navigation, …), and pulls metadata (`<title>`, Open Graph
 //! tags) out of the page.
 
-use std::collections::HashSet;
+use std::sync::OnceLock;
 
 use scraper::{ElementRef, Html, Selector};
 
 use crate::x::{is_x_article_url, x_article_body_unavailable};
 use crate::Post;
+
+/// Tag names that are stripped from the extracted content entirely
+/// (scripts, ads, navigation, form controls, media wrappers).
+///
+/// A plain slice is used instead of a `HashSet`: at 14 entries a linear scan
+/// is faster than hashing and costs zero allocations.
+const SKIP_TAGS: &[&str] = &[
+    "script", "style", "noscript", "iframe", "header", "footer", "nav", "aside", "form", "input",
+    "button", "svg", "picture", "source",
+];
+
+/// Parse a hard-coded CSS selector exactly once and cache it process-wide.
+///
+/// All selectors used by this module are compile-time constants, so parsing
+/// cannot fail; the `expect` documents that invariant rather than handling a
+/// runtime error.
+fn cached_selector(slot: &'static OnceLock<Selector>, css: &str) -> &'static Selector {
+    slot.get_or_init(|| Selector::parse(css).expect("hard-coded CSS selector must be valid"))
+}
 
 /// Recursively cleans an element by skipping unwanted tags and empty content.
 ///
@@ -44,15 +63,15 @@ use crate::Post;
 /// # Parameters
 ///
 /// - `element`: The HTML element to clean
-/// - `skip_tags`: Set of tag names to completely remove
+/// - `skip_tags`: Tag names to completely remove
 ///
 /// # Returns
 ///
 /// Cleaned HTML as a string, or empty string if no content remains
 #[must_use]
-fn clean_element(element: ElementRef, skip_tags: &HashSet<&str>) -> String {
+fn clean_element(element: ElementRef, skip_tags: &[&str]) -> String {
     let tag_name = element.value().name();
-    if skip_tags.contains(tag_name) {
+    if skip_tags.contains(&tag_name) {
         return String::new();
     }
 
@@ -109,27 +128,32 @@ fn clean_element(element: ElementRef, skip_tags: &HashSet<&str>) -> String {
 /// # Parameters
 ///
 /// - `document`: Parsed HTML document from scraper
-/// - `skip_tags`: Set of unwanted tag names to remove
+/// - `skip_tags`: Tag names to remove
 ///
 /// # Returns
 ///
 /// Cleaned HTML content string, or empty string if document is malformed
 #[must_use]
-fn extract_clean_content(document: &Html, skip_tags: &HashSet<&str>) -> String {
-    if let Ok(article_sel) = Selector::parse("article") {
-        if let Some(article) = document.select(&article_sel).next() {
-            let cleaned = clean_element(article, skip_tags);
-            if !cleaned.trim().is_empty() {
-                return cleaned;
-            }
+fn extract_clean_content(document: &Html, skip_tags: &[&str]) -> String {
+    static ARTICLE_SELECTOR: OnceLock<Selector> = OnceLock::new();
+    static BODY_SELECTOR: OnceLock<Selector> = OnceLock::new();
+
+    if let Some(article) = document
+        .select(cached_selector(&ARTICLE_SELECTOR, "article"))
+        .next()
+    {
+        let cleaned = clean_element(article, skip_tags);
+        if !cleaned.trim().is_empty() {
+            return cleaned;
         }
     }
 
     // Fallback: use the <body>
-    if let Ok(body_sel) = Selector::parse("body") {
-        if let Some(body) = document.select(&body_sel).next() {
-            return clean_element(body, skip_tags);
-        }
+    if let Some(body) = document
+        .select(cached_selector(&BODY_SELECTOR, "body"))
+        .next()
+    {
+        return clean_element(body, skip_tags);
     }
     String::new()
 }
@@ -162,17 +186,13 @@ pub fn parse_scraped_post_from_html(
 
     let document = Html::parse_document(body_text);
 
-    let skip_tags: HashSet<&str> = [
-        "script", "style", "noscript", "iframe", "header", "footer", "nav", "aside", "form",
-        "input", "button", "svg", "picture", "source",
-    ]
-    .iter()
-    .cloned()
-    .collect();
+    static TITLE_SELECTOR: OnceLock<Selector> = OnceLock::new();
+    static OG_IMAGE_SELECTOR: OnceLock<Selector> = OnceLock::new();
+    static PUBLISHED_TIME_SELECTOR: OnceLock<Selector> = OnceLock::new();
+    static AUTHOR_SELECTOR: OnceLock<Selector> = OnceLock::new();
 
-    let title_selector = Selector::parse("title").unwrap();
     let extracted_title = document
-        .select(&title_selector)
+        .select(cached_selector(&TITLE_SELECTOR, "title"))
         .next()
         .map(|elem| elem.text().collect::<Vec<_>>().join(" ").trim().to_string())
         .unwrap_or_default();
@@ -181,26 +201,29 @@ pub fn parse_scraped_post_from_html(
         .map(|title| title.trim().to_string())
         .unwrap_or(extracted_title);
 
-    let content = extract_clean_content(&document, &skip_tags);
+    let content = extract_clean_content(&document, SKIP_TAGS);
 
-    let meta_selector = Selector::parse(r#"meta[property="og:image"]"#).unwrap();
     let featured_image_url = document
-        .select(&meta_selector)
+        .select(cached_selector(
+            &OG_IMAGE_SELECTOR,
+            r#"meta[property="og:image"]"#,
+        ))
         .next()
         .and_then(|meta| meta.value().attr("content"))
         .unwrap_or("")
         .to_string();
 
-    let date_selector = Selector::parse(r#"meta[property="article:published_time"]"#).unwrap();
     let publication_date = document
-        .select(&date_selector)
+        .select(cached_selector(
+            &PUBLISHED_TIME_SELECTOR,
+            r#"meta[property="article:published_time"]"#,
+        ))
         .next()
         .and_then(|meta| meta.value().attr("content"))
         .map(String::from);
 
-    let author_selector = Selector::parse(r#"meta[name="author"]"#).unwrap();
     let author = document
-        .select(&author_selector)
+        .select(cached_selector(&AUTHOR_SELECTOR, r#"meta[name="author"]"#))
         .next()
         .and_then(|meta| meta.value().attr("content"))
         .map(String::from);

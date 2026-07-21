@@ -15,8 +15,9 @@
 use reqwest::Client;
 use serde::Deserialize;
 
+use crate::http::api_client;
 use crate::llm::convert_content_to_markdown;
-use crate::util::{first_non_empty_env_var, summarize_body, BROWSER_USER_AGENT};
+use crate::util::{first_non_empty_env_var, summarize_body};
 use crate::web::scrape_web_url_with_title_override;
 use crate::Post;
 
@@ -684,14 +685,11 @@ pub(crate) async fn scrape_x_url(
         }
     };
 
-    // ── 2. Build the HTTP client ──────────────────────────────────────────────
-    let client = Client::builder()
-        .user_agent(BROWSER_USER_AGENT)
-        .build()
-        .unwrap_or_default();
+    // ── 2. Use the shared API HTTP client ───────────────────────────────────
+    let client = api_client();
 
     // ── 3. Resolve the Bearer Token ──────────────────────────────────────────
-    let bearer_token = match resolve_x_bearer_token(&client).await {
+    let bearer_token = match resolve_x_bearer_token(client).await {
         Ok(token) => token,
         Err(error) => {
             return Post {
@@ -868,10 +866,10 @@ pub(crate) async fn scrape_x_url(
             };
         }
 
-        if let Some(article_url) = resolve_x_linked_article_url(&client, &root_tweet).await {
+        if let Some(article_url) = resolve_x_linked_article_url(client, &root_tweet).await {
             if is_x_article_url(&article_url) {
                 match scrape_x_article_from_web_graphql(
-                    &client,
+                    client,
                     &root_tweet.id,
                     article_title_override,
                     root_tweet.created_at.clone(),
