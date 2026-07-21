@@ -30,7 +30,7 @@ const X_WEB_TWEET_RESULT_BY_REST_ID_QUERY_ID: &str = "zy39CwTyYhU-_0LP7dljjg";
 
 /// A single tweet returned by the Twitter/X API v2.
 #[derive(Deserialize, Debug)]
-pub(crate) struct XTweet {
+pub struct XTweet {
     pub(crate) id: String,
     pub(crate) text: String,
     pub(crate) created_at: Option<String>,
@@ -41,7 +41,7 @@ pub(crate) struct XTweet {
 }
 
 #[derive(Deserialize, Debug)]
-pub(crate) struct XArticleMeta {
+pub struct XArticleMeta {
     pub(crate) title: Option<String>,
     pub(crate) plain_text: Option<String>,
     pub(crate) preview_text: Option<String>,
@@ -169,12 +169,12 @@ struct XWebArticleMediaInfo {
 /// //   https://x.com/user/status/1234567890
 /// //   https://twitter.com/user/status/1234567890
 /// ```
-pub(crate) fn is_x_url(url: &str) -> bool {
+pub fn is_x_url(url: &str) -> bool {
     url.starts_with("https://x.com/") || url.starts_with("https://twitter.com/")
 }
 
 /// Returns `true` for X Article URLs (`/i/article/<id>`).
-pub(crate) fn is_x_article_url(url: &str) -> bool {
+pub fn is_x_article_url(url: &str) -> bool {
     url.contains("x.com/i/article/") || url.contains("twitter.com/i/article/")
 }
 
@@ -185,7 +185,7 @@ pub(crate) fn is_x_article_url(url: &str) -> bool {
 /// - `https://twitter.com/user/status/1234567890?s=20` → `Some("1234567890")`
 ///
 /// Returns `None` if no numeric ID can be found after `/status/`.
-pub(crate) fn extract_tweet_id(url: &str) -> Option<String> {
+pub fn extract_tweet_id(url: &str) -> Option<String> {
     // Strip query-string and fragment before searching for the ID.
     let clean = url.split('?').next().unwrap_or(url);
     let clean = clean.split('#').next().unwrap_or(clean);
@@ -320,7 +320,7 @@ fn x_text_urls(tweet: &XTweet) -> Vec<String> {
     urls
 }
 
-fn x_linked_article_url(tweet: &XTweet) -> Option<String> {
+pub fn x_linked_article_url(tweet: &XTweet) -> Option<String> {
     x_text_urls(tweet).into_iter().find(|candidate| {
         !candidate.is_empty()
             && !candidate.starts_with("https://t.co/")
@@ -368,11 +368,11 @@ fn x_text_without_urls(tweet: &XTweet) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn x_post_is_link_only(tweet: &XTweet) -> bool {
+pub fn x_post_is_link_only(tweet: &XTweet) -> bool {
     x_text_without_urls(tweet).trim().is_empty()
 }
 
-pub(crate) fn x_article_plain_text(article: &XArticleMeta) -> Option<String> {
+pub fn x_article_plain_text(article: &XArticleMeta) -> Option<String> {
     article
         .plain_text
         .as_deref()
@@ -384,7 +384,7 @@ pub(crate) fn x_article_plain_text(article: &XArticleMeta) -> Option<String> {
 
 /// Detect X's guest-wall boilerplate ("This page is not supported", …) in a
 /// raw HTML body.
-pub(crate) fn x_article_body_unavailable(body: &str) -> bool {
+pub fn x_article_body_unavailable(body: &str) -> bool {
     let lower = body.to_ascii_lowercase();
     lower.contains("this page is not supported")
         || lower.contains("please visit the author's profile")
@@ -416,7 +416,7 @@ fn x_web_article_body(article: &XWebArticle) -> Option<String> {
     }
 }
 
-pub(crate) fn parse_x_web_article_post(
+pub fn parse_x_web_article_post(
     body: &str,
     title_override: Option<&str>,
     publication_date: Option<String>,
@@ -1023,272 +1023,5 @@ pub(crate) async fn scrape_x_url(
             error: err,
             ..scraped_post
         },
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::html::parse_scraped_post_from_html;
-
-    // ── is_x_url ──────────────────────────────────────────────────────────────
-
-    #[test]
-    fn test_is_x_url_x_com() {
-        assert!(is_x_url("https://x.com/user/status/123"));
-    }
-
-    #[test]
-    fn test_is_x_url_twitter_com() {
-        assert!(is_x_url("https://twitter.com/user/status/123"));
-    }
-
-    #[test]
-    fn test_is_x_url_non_x() {
-        assert!(!is_x_url("https://example.com/article"));
-        assert!(!is_x_url("https://bbc.com/news/world"));
-        assert!(!is_x_url("http://x.com/user/status/123")); // http, not https
-        assert!(!is_x_url("https://notx.com/user/status/123"));
-        assert!(!is_x_url("https://x.com")); // missing trailing slash and path
-        assert!(!is_x_url("https://twitter.com")); // missing trailing slash and path
-    }
-
-    // ── extract_tweet_id ──────────────────────────────────────────────────────
-
-    #[test]
-    fn test_extract_tweet_id_x_com() {
-        assert_eq!(
-            extract_tweet_id("https://x.com/user/status/1234567890"),
-            Some("1234567890".to_string())
-        );
-    }
-
-    #[test]
-    fn test_extract_tweet_id_twitter_com() {
-        assert_eq!(
-            extract_tweet_id("https://twitter.com/user/status/9876543210"),
-            Some("9876543210".to_string())
-        );
-    }
-
-    #[test]
-    fn test_extract_tweet_id_with_query_params() {
-        assert_eq!(
-            extract_tweet_id("https://x.com/user/status/111222333?s=20&t=abc"),
-            Some("111222333".to_string())
-        );
-    }
-
-    #[test]
-    fn test_extract_tweet_id_with_fragment() {
-        assert_eq!(
-            extract_tweet_id("https://x.com/user/status/555666777#anchor"),
-            Some("555666777".to_string())
-        );
-    }
-
-    #[test]
-    fn test_extract_tweet_id_no_status() {
-        assert_eq!(extract_tweet_id("https://x.com/user"), None);
-        assert_eq!(extract_tweet_id("https://example.com/article"), None);
-    }
-
-    #[test]
-    fn test_extract_tweet_id_empty_status() {
-        // /status/ present but no digits after it
-        assert_eq!(extract_tweet_id("https://x.com/user/status/"), None);
-    }
-
-    #[test]
-    fn test_x_linked_article_url_prefers_unwound_url() {
-        let tweet = XTweet {
-            id: "1".to_string(),
-            text: "https://t.co/abc".to_string(),
-            created_at: None,
-            author_id: None,
-            conversation_id: None,
-            article: None,
-            entities: Some(XEntities {
-                urls: Some(vec![XUrlEntity {
-                    url: Some("https://t.co/abc".to_string()),
-                    expanded_url: Some("https://x.com/DiarioBitcoin/status/123".to_string()),
-                    unwound_url: Some("https://www.diariobitcoin.com/test-article".to_string()),
-                }]),
-            }),
-        };
-
-        assert_eq!(
-            x_linked_article_url(&tweet),
-            Some("https://www.diariobitcoin.com/test-article".to_string())
-        );
-    }
-
-    #[test]
-    fn test_x_linked_article_url_ignores_status_links() {
-        let tweet = XTweet {
-            id: "1".to_string(),
-            text: "https://t.co/abc".to_string(),
-            created_at: None,
-            author_id: None,
-            conversation_id: None,
-            article: None,
-            entities: Some(XEntities {
-                urls: Some(vec![XUrlEntity {
-                    url: Some("https://t.co/abc".to_string()),
-                    expanded_url: Some("https://x.com/DiarioBitcoin/status/123".to_string()),
-                    unwound_url: None,
-                }]),
-            }),
-        };
-
-        assert_eq!(x_linked_article_url(&tweet), None);
-    }
-
-    #[test]
-    fn test_x_post_is_link_only() {
-        let tweet = XTweet {
-            id: "1".to_string(),
-            text: "https://t.co/abc".to_string(),
-            created_at: None,
-            author_id: None,
-            conversation_id: None,
-            article: None,
-            entities: Some(XEntities {
-                urls: Some(vec![XUrlEntity {
-                    url: Some("https://t.co/abc".to_string()),
-                    expanded_url: Some("https://www.diariobitcoin.com/test-article".to_string()),
-                    unwound_url: None,
-                }]),
-            }),
-        };
-
-        assert!(x_post_is_link_only(&tweet));
-    }
-
-    #[test]
-    fn test_x_post_is_not_link_only_when_text_remains() {
-        let tweet = XTweet {
-            id: "1".to_string(),
-            text: "Analisis completo https://t.co/abc".to_string(),
-            created_at: None,
-            author_id: None,
-            conversation_id: None,
-            article: None,
-            entities: Some(XEntities {
-                urls: Some(vec![XUrlEntity {
-                    url: Some("https://t.co/abc".to_string()),
-                    expanded_url: Some("https://www.diariobitcoin.com/test-article".to_string()),
-                    unwound_url: None,
-                }]),
-            }),
-        };
-
-        assert!(!x_post_is_link_only(&tweet));
-    }
-
-    #[test]
-    fn test_x_article_plain_text_prefers_plain_text() {
-        let article = XArticleMeta {
-            title: Some("Bitcoin bajo presión".to_string()),
-            plain_text: Some("  Cuerpo completo del articulo  ".to_string()),
-            preview_text: Some("Preview".to_string()),
-        };
-
-        assert_eq!(
-            x_article_plain_text(&article),
-            Some("Cuerpo completo del articulo".to_string())
-        );
-    }
-
-    #[test]
-    fn test_x_article_plain_text_falls_back_to_preview_text() {
-        let article = XArticleMeta {
-            title: Some("Bitcoin bajo presión".to_string()),
-            plain_text: None,
-            preview_text: Some("  Preview del articulo  ".to_string()),
-        };
-
-        assert_eq!(
-            x_article_plain_text(&article),
-            Some("Preview del articulo".to_string())
-        );
-    }
-
-    #[test]
-    fn test_is_x_article_url() {
-        assert!(is_x_article_url(
-            "https://x.com/i/article/2034262647731101696"
-        ));
-        assert!(!is_x_article_url(
-            "https://x.com/DiarioBitcoin/status/2034263054754726116"
-        ));
-    }
-
-    #[test]
-    fn test_x_article_body_unavailable_detects_guest_page() {
-        let body = "<html><body><h1>This page is not supported.</h1><p>Please visit the author's profile on the latest version of X to view this content.</p></body></html>";
-        assert!(x_article_body_unavailable(body));
-    }
-
-    #[test]
-    fn test_parse_scraped_post_from_html_blocks_guest_x_article_page() {
-        let post = parse_scraped_post_from_html(
-            "https://x.com/i/article/2034262647731101696",
-            "<html><body><h1>This page is not supported.</h1></body></html>",
-            Some("Expected X Article Title"),
-        );
-
-        assert_eq!(post.title, "Expected X Article Title");
-        assert!(post
-            .error
-            .contains("X article body is not available in the guest HTML response"));
-    }
-
-    #[test]
-    fn test_parse_x_web_article_post_prefers_graphql_article_payload() {
-        let body = r#"{
-          "data": {
-            "tweetResult": {
-              "result": {
-                "article": {
-                  "article_results": {
-                    "result": {
-                      "title": "Bitcoin bajo presión",
-                      "plain_text": "Primer parrafo.\n\nSegundo parrafo.",
-                      "cover_media": {
-                        "media_info": {
-                          "original_img_url": "https://pbs.twimg.com/media/example.jpg"
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }"#;
-
-        let post = parse_x_web_article_post(
-            body,
-            Some("Fallback title"),
-            Some("2026-03-18T13:38:01.000Z".to_string()),
-            Some("@DiarioBitcoin (Diario฿itcoin)".to_string()),
-        )
-        .unwrap();
-
-        assert_eq!(post.title, "Bitcoin bajo presión");
-        assert_eq!(post.content, "Primer parrafo.\n\nSegundo parrafo.");
-        assert_eq!(
-            post.featured_image_url,
-            "https://pbs.twimg.com/media/example.jpg"
-        );
-        assert_eq!(
-            post.publication_date,
-            Some("2026-03-18T13:38:01.000Z".to_string())
-        );
-        assert_eq!(
-            post.author,
-            Some("@DiarioBitcoin (Diario฿itcoin)".to_string())
-        );
     }
 }

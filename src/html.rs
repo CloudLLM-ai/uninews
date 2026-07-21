@@ -144,7 +144,7 @@ fn extract_clean_content(document: &Html, skip_tags: &HashSet<&str>) -> String {
 /// X article guest pages that withhold the article body are detected up
 /// front and reported as an error instead of returning the "this page is
 /// not supported" boilerplate as content.
-pub(crate) fn parse_scraped_post_from_html(
+pub fn parse_scraped_post_from_html(
     source_url: &str,
     body_text: &str,
     title_override: Option<&str>,

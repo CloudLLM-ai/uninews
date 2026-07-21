@@ -94,11 +94,13 @@
 //! ```
 
 mod browser;
-mod html;
-mod llm;
+#[doc(hidden)]
+pub mod html;
+pub mod llm;
 mod util;
 mod web;
-mod x;
+#[doc(hidden)]
+pub mod x;
 
 use serde::Serialize;
 

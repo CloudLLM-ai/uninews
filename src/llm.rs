@@ -289,7 +289,8 @@ pub fn llm_context_window() -> usize {
 
 /// Normalize the requested output language: empty or whitespace-only input
 /// falls back to `"english"`.
-pub(crate) fn normalized_output_language(language: &str) -> &str {
+#[doc(hidden)]
+pub fn normalized_output_language(language: &str) -> &str {
     if language.trim().is_empty() {
         "english"
     } else {
@@ -298,7 +299,8 @@ pub(crate) fn normalized_output_language(language: &str) -> &str {
 }
 
 /// System prompt for the near-lossless HTML → Markdown conversion.
-pub(crate) fn markdown_system_prompt(language: &str) -> String {
+#[doc(hidden)]
+pub fn markdown_system_prompt(language: &str) -> String {
     format!(
         "You are an expert markdown formatter and translator for scraped news articles. \
          The provided JSON already contains the extracted article body in the `content` field. \
@@ -313,7 +315,8 @@ pub(crate) fn markdown_system_prompt(language: &str) -> String {
 }
 
 /// User prompt wrapping the serialized [`Post`] JSON for the conversion call.
-pub(crate) fn markdown_user_prompt(language: &str, post_json: &str) -> String {
+#[doc(hidden)]
+pub fn markdown_user_prompt(language: &str, post_json: &str) -> String {
     format!(
         "Convert the following Post JSON into Markdown formatted text in {}. \
          Treat `content` as the canonical article body and keep it nearly verbatim except for Markdown formatting, minimal cleanup, and faithful translation if needed. \
@@ -444,31 +447,5 @@ pub async fn convert_content_to_markdown(
             Ok(post)
         }
         Err(err) => Err(format!("LLM Error: {}", err)),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_normalized_output_language_defaults_to_english() {
-        assert_eq!(normalized_output_language(""), "english");
-        assert_eq!(normalized_output_language("   "), "english");
-        assert_eq!(normalized_output_language("spanish"), "spanish");
-    }
-
-    #[test]
-    fn test_markdown_prompts_require_near_lossless_preservation() {
-        let system_prompt = markdown_system_prompt("english");
-        let user_prompt = markdown_user_prompt("english", r#"{"content":"<p>Hello</p>"}"#);
-
-        assert!(
-            system_prompt.contains("preserving the source text and structure as fully as possible")
-        );
-        assert!(system_prompt
-            .contains("Do not summarize, paraphrase, compress, or omit substantive details"));
-        assert!(user_prompt.contains("Treat `content` as the canonical article body"));
-        assert!(user_prompt.contains("keep it nearly verbatim"));
     }
 }
