@@ -1,5 +1,24 @@
 0.44.0 UNRELEASED
-- (work in progress)
+- Split `lib.rs` (~2,600 lines) into focused modules: `llm` (provider
+  selection, context-window budget, Markdown conversion), `web` (plain-HTTP
+  pipeline), `x` (X/Twitter tweets, threads, articles), `html` (content
+  cleaning/metadata), `browser` (headless-Chrome fallback), `http` (shared
+  reqwest clients), `util` (shared helpers). Public API unchanged.
+- Move all unit tests out of `src/` into `tests/` (`x_scrape_helpers.rs`,
+  `llm_prompts.rs`), exercising the crate through its public surface.
+- Performance: share two process-wide `reqwest::Client`s instead of building
+  one per scrape (connection reuse); parse CSS selectors once into `OnceLock`
+  statics; replace the per-call skip-tag `HashSet` with a const slice.
+- Security/robustness: 10s connect + 30s request timeouts on all HTTP calls;
+  remove `unwrap()` on the fetch response; document SSRF/secrets/trusted-env
+  considerations in the crate docs.
+- New `events` module: typed `ScrapeEvent` stream (scrape start/complete/
+  fail, fetch start/success/fail, content extraction, LLM conversion,
+  bot-protection + archive.org fallback events). Register a single
+  process-wide listener via `set_event_listener` (multiplexing is left to
+  callers by design — see module docs). Events serialize to JSON with a
+  snake_case `event` tag. Panicking listeners are caught and never abort a
+  scrape.
 
 0.43.0 JUL/10/2026
 - Bump `cloudllm` 0.15.7 → **0.15.10** (GPT-5.6 Sol/Terra/Luna + Grok 4.5 enums,

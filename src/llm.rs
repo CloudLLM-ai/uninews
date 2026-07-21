@@ -21,6 +21,7 @@ use cloudllm::clients::openai::{Model as OpenAIModel, OpenAIClient};
 use cloudllm::clients::openrouter::OpenRouterClient;
 use cloudllm::LLMSession;
 
+use crate::events::{emit_event, ScrapeEvent};
 use crate::Post;
 
 /// Default LLM client when `UNINEWS_LLM_CLIENT` is unset.
@@ -422,6 +423,16 @@ pub async fn convert_content_to_markdown(
     // Build the CloudLLM client selected by UNINEWS_LLM_CLIENT / UNINEWS_LLM_MODEL.
     let client = build_uninews_llm_client()?;
 
+    let provider = format!(
+        "{} ({})",
+        client.llm_provider_name().unwrap_or("unknown"),
+        client.llm_model_name().unwrap_or("unknown")
+    );
+    emit_event(ScrapeEvent::LlmConversionStarted {
+        provider: provider.clone(),
+        content_bytes: post.content.len(),
+    });
+
     // Normalize language: if empty, default to "english".
     let lang = normalized_output_language(language);
 
@@ -444,8 +455,18 @@ pub async fn convert_content_to_markdown(
     match session.send_message(Role::User, user_prompt, None).await {
         Ok(response) => {
             post.content = response.content.to_string();
+            emit_event(ScrapeEvent::LlmConversionSucceeded {
+                provider,
+                markdown_bytes: post.content.len(),
+            });
             Ok(post)
         }
-        Err(err) => Err(format!("LLM Error: {}", err)),
+        Err(err) => {
+            emit_event(ScrapeEvent::LlmConversionFailed {
+                provider,
+                error: err.to_string(),
+            });
+            Err(format!("LLM Error: {}", err))
+        }
     }
 }

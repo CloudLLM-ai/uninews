@@ -15,6 +15,7 @@
 use reqwest::Client;
 use serde::Deserialize;
 
+use crate::events::{emit_event, ScrapeEvent};
 use crate::http::api_client;
 use crate::llm::convert_content_to_markdown;
 use crate::util::{first_non_empty_env_var, summarize_body};
@@ -710,6 +711,9 @@ pub(crate) async fn scrape_x_url(
         "https://api.x.com/2/tweets/{}?tweet.fields=created_at,author_id,conversation_id,text,entities,article&expansions=author_id&user.fields=name,username,profile_image_url",
         tweet_id
     );
+    emit_event(ScrapeEvent::FetchStarted {
+        url: root_tweet_url.clone(),
+    });
     let root_resp = match client
         .get(&root_tweet_url)
         .header("Authorization", &auth_header)
@@ -718,6 +722,10 @@ pub(crate) async fn scrape_x_url(
     {
         Ok(r) => r,
         Err(e) => {
+            emit_event(ScrapeEvent::FetchFailed {
+                url: root_tweet_url.clone(),
+                error: e.to_string(),
+            });
             return Post {
                 title: String::new(),
                 content: String::new(),
@@ -733,6 +741,10 @@ pub(crate) async fn scrape_x_url(
     let root_body = match root_resp.text().await {
         Ok(body) => body,
         Err(e) => {
+            emit_event(ScrapeEvent::FetchFailed {
+                url: root_tweet_url.clone(),
+                error: format!("Failed to read X API response body: {}", e),
+            });
             return Post {
                 title: String::new(),
                 content: String::new(),
@@ -744,6 +756,11 @@ pub(crate) async fn scrape_x_url(
         }
     };
     x_debug_dump("X root tweet JSON", &root_body);
+    emit_event(ScrapeEvent::FetchSucceeded {
+        url: root_tweet_url.clone(),
+        status: root_status.as_u16(),
+        body_bytes: root_body.len(),
+    });
 
     if !root_status.is_success() {
         let message =

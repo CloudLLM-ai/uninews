@@ -12,6 +12,7 @@ use std::error::Error as StdError;
 use std::fmt::Write as _;
 
 use crate::browser::fetch_rendered_dom_with_chrome;
+use crate::events::{emit_event, ScrapeEvent};
 use crate::html::parse_scraped_post_from_html;
 use crate::http::web_client;
 use crate::llm::convert_content_to_markdown;
@@ -27,6 +28,10 @@ use crate::Post;
 /// X Article URLs whose guest HTML withholds the body, a headless-Chrome
 /// render is attempted before giving up.
 async fn scrape_web_url_raw_with_title_override(url: &str, title_override: Option<&str>) -> Post {
+    emit_event(ScrapeEvent::FetchStarted {
+        url: url.to_string(),
+    });
+
     let response = match web_client().get(url).send().await {
         Ok(response) => response,
         Err(err) => {
@@ -38,6 +43,10 @@ async fn scrape_web_url_raw_with_title_override(url: &str, title_override: Optio
                 let _ = write!(msg, " => {}", cause);
                 src = cause.source();
             }
+            emit_event(ScrapeEvent::FetchFailed {
+                url: url.to_string(),
+                error: msg.clone(),
+            });
             return Post {
                 title: "".into(),
                 content: "".into(),
@@ -55,6 +64,10 @@ async fn scrape_web_url_raw_with_title_override(url: &str, title_override: Optio
     let body_text = match response.text().await {
         Ok(text) => text,
         Err(err) => {
+            emit_event(ScrapeEvent::FetchFailed {
+                url: url.to_string(),
+                error: format!("Failed to read response body: {}", err),
+            });
             return Post {
                 title: "".into(),
                 content: "".into(),
@@ -62,9 +75,15 @@ async fn scrape_web_url_raw_with_title_override(url: &str, title_override: Optio
                 publication_date: None,
                 author: None,
                 error: format!("Failed to read response body: {}", err),
-            }
+            };
         }
     };
+
+    emit_event(ScrapeEvent::FetchSucceeded {
+        url: response_url.clone(),
+        status: response_status.as_u16(),
+        body_bytes: body_text.len(),
+    });
 
     if is_x_article {
         x_debug_dump_http_response(
@@ -77,6 +96,17 @@ async fn scrape_web_url_raw_with_title_override(url: &str, title_override: Optio
     }
 
     let scraped_post = parse_scraped_post_from_html(&response_url, &body_text, title_override);
+    if scraped_post.error.is_empty() {
+        emit_event(ScrapeEvent::ContentExtracted {
+            url: response_url.clone(),
+            content_bytes: scraped_post.content.len(),
+        });
+    } else {
+        emit_event(ScrapeEvent::ContentExtractionFailed {
+            url: response_url.clone(),
+            error: scraped_post.error.clone(),
+        });
+    }
     if scraped_post.error.is_empty() || !is_x_article {
         return scraped_post;
     }

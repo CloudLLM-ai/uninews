@@ -9,6 +9,8 @@
 //! - **AI-Powered Formatting**: Converts raw HTML to near-lossless Markdown using pluggable LLM providers
 //! - **Metadata Extraction**: Captures title, author, publication date, and featured images
 //! - **Multilingual Support**: Translates content to any language during processing
+//! - **Progress Events**: Optional single-listener event stream ([`events`]) for
+//!   live scraping feedback in agents, harnesses, and UIs
 //! - **Async/Await**: Built with Tokio for efficient async operations
 //!
 //! ## Quick Start
@@ -108,6 +110,7 @@
 //! ```
 
 mod browser;
+pub mod events;
 #[doc(hidden)]
 pub mod html;
 mod http;
@@ -119,6 +122,7 @@ pub mod x;
 
 use serde::Serialize;
 
+pub use events::{set_event_listener, ScrapeEvent, ScrapeEventListener};
 pub use llm::{
     active_llm_client, active_provider_label, convert_content_to_markdown, llm_context_window,
     resolve_llm_context_window, uninews_llm_context_window, LLMClientInfo,
@@ -373,9 +377,27 @@ pub async fn universal_scrape(
     language: &str,
     context_window_tokens: Option<usize>,
 ) -> Post {
+    events::emit_event(ScrapeEvent::ScrapeStarted {
+        url: url.to_string(),
+    });
+
     // Delegate to the X.com handler for X / Twitter URLs.
-    if x::is_x_url(url) {
-        return x::scrape_x_url(url, language, context_window_tokens).await;
+    let post = if x::is_x_url(url) {
+        x::scrape_x_url(url, language, context_window_tokens).await
+    } else {
+        web::scrape_web_url(url, language, context_window_tokens).await
+    };
+
+    if post.error.is_empty() {
+        events::emit_event(ScrapeEvent::ScrapeCompleted {
+            url: url.to_string(),
+        });
+    } else {
+        events::emit_event(ScrapeEvent::ScrapeFailed {
+            url: url.to_string(),
+            error: post.error.clone(),
+        });
     }
-    web::scrape_web_url(url, language, context_window_tokens).await
+
+    post
 }
