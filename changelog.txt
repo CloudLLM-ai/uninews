@@ -35,6 +35,14 @@
   went from a 243-byte teaser to the full 9.4KB story).
 - New `examples/scrape_with_events.rs`: scrape a URL while printing live
   `ScrapeEvent`s to stderr — reference implementation for listener users.
+- Update third-party dependencies:
+  - tokio 1.52.3 → 1.53.1
+  - serde 1.0.228 → 1.0.229
+  - serde_json 1.0.150 → 1.0.151
+  - clap 4.6.1 → 4.6.4
+  - (cloudllm 0.15.10, reqwest 0.13.4, scraper 0.27.0 already latest)
+  - Lockfile refresh also pulls rustls 0.23.42, rustls-native-certs 0.8.4,
+    webpki-root-certs 1.0.9, aws-lc-rs 1.17.3, zeroize 1.9.0.
 
 0.43.0 JUL/10/2026
 - Bump `cloudllm` 0.15.7 → **0.15.10** (GPT-5.6 Sol/Terra/Luna + Grok 4.5 enums,
