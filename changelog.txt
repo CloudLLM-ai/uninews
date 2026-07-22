@@ -1,4 +1,4 @@
-0.44.0 UNRELEASED
+0.44.0 JUL/21/2026
 - Split `lib.rs` (~2,600 lines) into focused modules: `llm` (provider
   selection, context-window budget, Markdown conversion), `web` (plain-HTTP
   pipeline), `x` (X/Twitter tweets, threads, articles), `html` (content
