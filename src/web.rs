@@ -6,15 +6,22 @@
 //! 1. Plain HTTP fetch with a browser User-Agent.
 //! 2. For X Article guest walls: headless-Chrome rendering
 //!    ([`crate::browser`]).
-//! 3. For bot-protection walls and hard failures (network errors, 5xx):
-//!    the archive.org Wayback Machine fallback ([`crate::archive`]).
-//! 4. LLM Markdown conversion of the extracted body ([`crate::llm`]).
+//! 3. For bot-protection walls (Cloudflare & co.): Playwright Chromium
+//!    render ([`crate::browser::fetch_rendered_dom_with_playwright`]),
+//!    when enabled via `UNINEWS_PLAYWRIGHT` (default on).
+//! 4. For remaining bot-protection walls and hard failures (network errors,
+//!    5xx): the archive.org Wayback Machine fallback ([`crate::archive`]).
+//! 5. LLM Markdown conversion of the extracted body ([`crate::llm`]).
 
 use std::error::Error as StdError;
 use std::fmt::Write as _;
 
+use reqwest::header::HeaderMap;
+
 use crate::archive::{archive_fallback_enabled, latest_snapshot, looks_like_bot_protection};
-use crate::browser::fetch_rendered_dom_with_chrome;
+use crate::browser::{
+    fetch_rendered_dom_with_chrome, fetch_rendered_dom_with_playwright, playwright_enabled,
+};
 use crate::events::{emit_event, ScrapeEvent};
 use crate::html::parse_scraped_post_from_html;
 use crate::http::web_client;
@@ -231,24 +238,103 @@ async fn fetch_and_parse(url: &str, title_override: Option<&str>) -> RawFetch {
     }
 }
 
+/// Try Playwright Chromium for a bot-protected page. Returns `Some(post)`
+/// when the rendered DOM yields usable article content; `None` when the
+/// fallback is skipped, fails, or still looks blocked (caller continues to
+/// archive.org).
+async fn try_playwright_fallback(
+    url: &str,
+    title_override: Option<&str>,
+    prior_error: &str,
+) -> Option<Post> {
+    if !playwright_enabled() {
+        return None;
+    }
+
+    emit_event(ScrapeEvent::PlaywrightFallbackStarted {
+        url: url.to_string(),
+    });
+
+    let html = match fetch_rendered_dom_with_playwright(url).await {
+        Ok(html) => html,
+        Err(err) => {
+            emit_event(ScrapeEvent::PlaywrightFallbackFailed {
+                url: url.to_string(),
+                error: err,
+            });
+            return None;
+        }
+    };
+
+    // Still a challenge interstitial → do not treat as success.
+    if looks_like_bot_protection(200, &HeaderMap::new(), &html) {
+        let msg = "Playwright rendered DOM still looks like a bot-protection wall".to_string();
+        emit_event(ScrapeEvent::PlaywrightFallbackFailed {
+            url: url.to_string(),
+            error: msg,
+        });
+        return None;
+    }
+
+    let rendered = parse_scraped_post_from_html(url, &html, title_override);
+    if rendered.error.is_empty() {
+        emit_event(ScrapeEvent::PlaywrightFallbackSucceeded {
+            url: url.to_string(),
+            body_bytes: html.len(),
+        });
+        emit_event(ScrapeEvent::ContentExtracted {
+            url: url.to_string(),
+            content_bytes: rendered.content.len(),
+        });
+        return Some(rendered);
+    }
+
+    emit_event(ScrapeEvent::PlaywrightFallbackFailed {
+        url: url.to_string(),
+        error: format!(
+            "rendered DOM extracted no usable content (prior: {prior_error}; extraction: {})",
+            rendered.error
+        ),
+    });
+    None
+}
+
 /// Fetch `url` and parse the HTML body into a [`Post`], without any LLM
 /// conversion.
 ///
 /// On failure the returned post carries the error in [`Post::error`]. When
-/// the failure is caused by bot protection or is a hard failure (network
-/// error, 5xx), the archive.org Wayback Machine fallback is attempted first
-/// (unless disabled via `UNINEWS_ARCHIVE_FALLBACK=0`).
+/// the failure is caused by bot protection, Playwright Chromium is tried
+/// first (unless disabled via `UNINEWS_PLAYWRIGHT=0`). Remaining bot walls
+/// and hard failures (network error, 5xx) then go through the archive.org
+/// Wayback Machine fallback (unless disabled via `UNINEWS_ARCHIVE_FALLBACK=0`).
 async fn scrape_web_url_raw_with_title_override(url: &str, title_override: Option<&str>) -> Post {
     let raw = fetch_and_parse(url, title_override).await;
     if raw.post.error.is_empty() {
         return raw.post;
     }
 
+    // Bot-protection → Playwright before archive.org (fresher content).
+    let mut post_after_playwright = raw.post;
+    if raw.bot_protected {
+        if let Some(rendered) =
+            try_playwright_fallback(url, title_override, &post_after_playwright.error).await
+        {
+            return rendered;
+        }
+        // Annotate so the final error chain shows Playwright was attempted.
+        if playwright_enabled() {
+            post_after_playwright.error = format!(
+                "{} (Playwright Chromium fallback did not yield usable content)",
+                post_after_playwright.error
+            );
+        }
+    }
+
     // The archive.org fallback covers bot-protection walls and hard
     // failures. X URLs keep their own dedicated fallback chain.
     let eligible = raw.bot_protected || raw.network_failure || raw.server_error;
     if !archive_fallback_enabled() || is_x_url(url) || !eligible {
-        return raw.post;
+        return post_after_playwright;
     }
 
     let reason = if raw.bot_protected {
@@ -279,9 +365,9 @@ async fn scrape_web_url_raw_with_title_override(url: &str, title_override: Optio
             Post {
                 error: format!(
                     "{} (archive.org snapshot {} also failed: {})",
-                    raw.post.error, snapshot.url, archived.post.error
+                    post_after_playwright.error, snapshot.url, archived.post.error
                 ),
-                ..raw.post
+                ..post_after_playwright
             }
         }
         Ok(None) => {
@@ -289,16 +375,19 @@ async fn scrape_web_url_raw_with_title_override(url: &str, title_override: Optio
                 url: url.to_string(),
             });
             Post {
-                error: format!("{} (no archive.org snapshot available)", raw.post.error),
-                ..raw.post
+                error: format!(
+                    "{} (no archive.org snapshot available)",
+                    post_after_playwright.error
+                ),
+                ..post_after_playwright
             }
         }
         Err(lookup_error) => Post {
             error: format!(
                 "{} (archive.org lookup failed: {})",
-                raw.post.error, lookup_error
+                post_after_playwright.error, lookup_error
             ),
-            ..raw.post
+            ..post_after_playwright
         },
     }
 }

@@ -11,6 +11,9 @@
 //! - **Multilingual Support**: Translates content to any language during processing
 //! - **Progress Events**: Optional single-listener event stream ([`events`]) for
 //!   live scraping feedback in agents, harnesses, and UIs
+//! - **Playwright Fallback**: Bot-protection walls (Cloudflare & co.) are first
+//!   retried via headless Chromium through `playwright-rs` (requires Node.js
+//!   and a one-time Chromium install). Disable with `UNINEWS_PLAYWRIGHT=0`.
 //! - **archive.org Fallback**: Automatically retries bot-protected or unreachable
 //!   pages via the latest Wayback Machine snapshot ([`archive`])
 //! - **Async/Await**: Built with Tokio for efficient async operations
@@ -73,7 +76,8 @@
 //! - `web` — plain-HTTP scraping pipeline for non-X URLs.
 //! - `x` — X.com / Twitter tweets, threads, and articles.
 //! - `html` — HTML cleaning and metadata extraction.
-//! - `browser` — headless-Chrome rendering fallback.
+//! - `browser` — headless-Chrome (`--dump-dom`) and Playwright Chromium
+//!   rendering fallbacks.
 //! - [`archive`] — archive.org Wayback Machine fallback for protected or
 //!   unreachable pages.
 //! - [`events`] — typed progress events with a single-listener emitter.
@@ -130,6 +134,17 @@ pub mod x;
 use serde::Serialize;
 
 pub use archive::{archive_fallback_enabled, ArchiveSnapshot, UNINEWS_ARCHIVE_FALLBACK_ENV};
+// Re-export Playwright toggles from the private `browser` module so operators
+// and tests can configure the bot-protection browser path without reaching
+// into crate-private modules.
+#[doc(hidden)]
+pub use browser::{
+    is_falsy_env_flag, looks_like_browser_not_installed_message, parse_playwright_timeout_ms,
+};
+pub use browser::{
+    playwright_enabled, DEFAULT_PLAYWRIGHT_TIMEOUT_MS, UNINEWS_PLAYWRIGHT_ENV,
+    UNINEWS_PLAYWRIGHT_TIMEOUT_MS_ENV,
+};
 pub use events::{set_event_listener, ScrapeEvent, ScrapeEventListener};
 pub use llm::{
     active_llm_client, active_provider_label, convert_content_to_markdown, llm_context_window,

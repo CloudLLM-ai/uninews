@@ -110,6 +110,30 @@ pub enum ScrapeEvent {
         /// The protected page URL.
         url: String,
     },
+    /// The Playwright Chromium fallback is about to render a bot-protected
+    /// (or otherwise JS-gated) page. Emitted only when `UNINEWS_PLAYWRIGHT`
+    /// is enabled (the default).
+    PlaywrightFallbackStarted {
+        /// The page URL being rendered.
+        url: String,
+    },
+    /// Playwright produced a usable DOM that the HTML extractor accepted as
+    /// real article content (not still a challenge interstitial).
+    PlaywrightFallbackSucceeded {
+        /// The page URL that was rendered.
+        url: String,
+        /// Size of the rendered HTML in bytes.
+        body_bytes: usize,
+    },
+    /// Playwright could not produce usable content (launch failure, missing
+    /// Chromium, still blocked by a challenge, empty DOM, extraction
+    /// failure, …). The pipeline continues to archive.org when eligible.
+    PlaywrightFallbackFailed {
+        /// The page URL that was attempted.
+        url: String,
+        /// Human-readable failure description.
+        error: String,
+    },
     /// The archive.org Wayback Machine fallback has been engaged.
     ArchiveFallbackStarted {
         /// The original URL that could not be scraped directly.
