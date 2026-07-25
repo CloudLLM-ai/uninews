@@ -1,3 +1,18 @@
+0.45.0 JUL/25/2026
+- Playwright Chromium fallback for bot-protection walls (Cloudflare & co.)
+  via `playwright-rs` 0.15, tried *before* archive.org so fresh articles
+  (e.g. theblock.co) can be recovered when Wayback has no snapshot yet.
+  Enabled by default; disable with `UNINEWS_PLAYWRIGHT=0`. Optional
+  `UNINEWS_PLAYWRIGHT_TIMEOUT_MS` (default 45000). On first "browser not
+  installed" error the process attempts `install_browsers(chromium)` once.
+- New `ScrapeEvent`s: `PlaywrightFallbackStarted` /
+  `PlaywrightFallbackSucceeded` / `PlaywrightFallbackFailed`.
+- Public toggles: `playwright_enabled()`, `UNINEWS_PLAYWRIGHT_ENV`,
+  `UNINEWS_PLAYWRIGHT_TIMEOUT_MS_ENV`, `DEFAULT_PLAYWRIGHT_TIMEOUT_MS`.
+- Runtime deps for the Playwright path: Node.js 18+ on PATH + one-time
+  `npx playwright@1.61.1 install chromium` (or auto-install).
+- README documents the Playwright path and the updated fallback chain.
+
 0.44.0 JUL/21/2026
 - Split `lib.rs` (~2,600 lines) into focused modules: `llm` (provider
   selection, context-window budget, Markdown conversion), `web` (plain-HTTP

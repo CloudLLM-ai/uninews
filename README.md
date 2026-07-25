@@ -38,7 +38,8 @@ Options:
 - **Scraping & Cleaning:** Extracts the main content of a news article by targeting the `<article>` tag (or falling back to `<body>`) and removing unwanted elements.
 - **Markdown Conversion:** Uses the [CloudLLM](https://github.com/CloudLLM-ai/cloudllm/tree/main) Rust API to convert the cleaned HTML content into near-lossless Markdown. The LLM provider is pluggable via env vars (see [LLM Providers](#llm-providers)).
 - **X.com / Twitter Support:** Reads individual tweets and full X threads via the X API v2, assembling the thread chronologically before converting it to Markdown.
-- **archive.org Fallback:** Pages behind bot-protection walls (Cloudflare & co.) or failing outright (network errors, 5xx) are automatically retried via the latest Wayback Machine snapshot. Enabled by default; set `UNINEWS_ARCHIVE_FALLBACK=0` to disable. See [archive.org Fallback](#archiveorg-fallback).
+- **Playwright Fallback:** Bot-protection walls (Cloudflare challenges and similar) are first retried by rendering the page in headless Chromium via [`playwright-rs`](https://crates.io/crates/playwright-rs). Requires Node.js on `PATH` and a one-time Chromium install (see [Playwright Fallback](#playwright-fallback)). Enabled by default; set `UNINEWS_PLAYWRIGHT=0` to disable.
+- **archive.org Fallback:** Pages still blocked after Playwright (or when Playwright is disabled), and pages failing outright (network errors, 5xx), are retried via the latest Wayback Machine snapshot. Enabled by default; set `UNINEWS_ARCHIVE_FALLBACK=0` to disable. See [archive.org Fallback](#archiveorg-fallback).
 - **Progress Events:** Library users can register a single process-wide listener to receive typed `ScrapeEvent`s for every pipeline step — ideal for agents, harnesses, and UIs that need live feedback. See [Progress Events](#progress-events).
 - **Reusable Library:** The `universal_scrape` function is exposed for easy integration into other Rust projects.
 - **Multilanguage Support:** The `universal_scrape` function accepts an optional language parameter to specify the language of the article to scrape, otherwise it defaults to English.
@@ -62,11 +63,31 @@ Events cover scrape start/completion/failure, fetch start/success/failure, conte
 
 Only **one** listener is supported by design; if you need several consumers, register a closure that multiplexes to your own subscribers (see the `events` module docs). A runnable reference implementation lives in [`examples/scrape_with_events.rs`](examples/scrape_with_events.rs).
 
+## Playwright Fallback
+
+When a plain HTTP fetch hits a **bot-protection wall** (Cloudflare challenge page, JS interstitial, `401`/`403`/`429` with Cloudflare headers), uninews renders the URL in **headless Chromium** through Microsoft Playwright (`playwright-rs`) before falling back to archive.org. That recovers fresh articles that have no usable Wayback snapshot yet (e.g. theblock.co).
+
+| Variable | Default | Description |
+|---|---|---|
+| `UNINEWS_PLAYWRIGHT` | on | Set to `0` / `false` / `no` / `off` to skip Playwright. |
+| `UNINEWS_PLAYWRIGHT_TIMEOUT_MS` | `45000` | Navigation + content-wait budget in milliseconds. |
+
+**Runtime requirements** (not pure Cargo):
+
+1. **Node.js 18+** on `PATH` (Playwright’s driver is a Node server).
+2. **Chromium for Playwright** — install once, matching the driver version bundled by `playwright-rs` (currently 1.61.1):
+
+```bash
+npx playwright@1.61.1 install chromium
+```
+
+If Chromium is missing, uninews will attempt `playwright_rs::install_browsers(Some(&["chromium"]))` **once** per process, then retry. Events: `PlaywrightFallbackStarted` / `PlaywrightFallbackSucceeded` / `PlaywrightFallbackFailed`.
+
 ## archive.org Fallback
 
-When a page cannot be scraped directly, uninews asks the [Wayback Machine](https://archive.org/web/) for the latest snapshot of the URL and scrapes that instead. The fallback triggers on:
+When a page cannot be scraped directly (and Playwright did not recover it), uninews asks the [Wayback Machine](https://archive.org/web/) for the latest snapshot of the URL and scrapes that instead. The fallback triggers on:
 
-- **Bot-protection walls** — Cloudflare challenge pages ("Just a moment…"), JavaScript-required interstitials, and `401`/`403`/`429` responses served by Cloudflare.
+- **Bot-protection walls** that still fail after Playwright (or when Playwright is disabled).
 - **Hard failures** — connection errors, timeouts, and `5xx` server errors.
 
 It is **enabled by default**; set `UNINEWS_ARCHIVE_FALLBACK=0` (or `false`/`no`/`off`) to disable it. Every step is reported through the event stream (`ArchiveFallbackStarted`, `ArchiveSnapshotFound`, `ArchiveSnapshotNotFound`), and if the fallback also fails, the final `Post::error` explains what happened.
