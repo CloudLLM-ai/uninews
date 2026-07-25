@@ -10,7 +10,7 @@ use std::env;
 use std::sync::Mutex;
 
 use uninews::{
-    llm_context_window, resolve_llm_context_window, uninews_llm_context_window,
+    active_llm_client, llm_context_window, resolve_llm_context_window, uninews_llm_context_window,
     DEFAULT_LLM_CONTEXT_WINDOW, UNINEWS_LLM_CONTEXT_WINDOW_ENV,
 };
 
@@ -142,4 +142,24 @@ fn resolve_llm_context_window_rejects_explicit_zero() {
     let _env_lock = ENV_LOCK.lock().unwrap();
     let _guard = EnvVarGuard::unset(UNINEWS_LLM_CONTEXT_WINDOW_ENV);
     assert_eq!(resolve_llm_context_window(Some(0)), DEFAULT_LLM_CONTEXT_WINDOW);
+}
+
+/// The unknown-`UNINEWS_LLM_CLIENT` error path must name the offending value,
+/// exercised through the public `active_llm_client()`. Hermetic: the error is
+/// returned before any provider client (or API key) is touched, so no network
+/// call is possible. The env var is pinned explicitly because the dev shell
+/// may export a real `UNINEWS_LLM_CLIENT`.
+#[test]
+fn active_llm_client_rejects_unknown_uninews_llm_client() {
+    let _env_lock = ENV_LOCK.lock().unwrap();
+    let _guard = EnvVarGuard::set("UNINEWS_LLM_CLIENT", "not-a-provider");
+    // `.err()` (not `expect_err`): `Arc<dyn ClientWrapper>` has no `Debug`.
+    let error = active_llm_client()
+        .err()
+        .expect("an unknown client name must fail");
+    assert!(
+        error.contains("Unsupported UNINEWS_LLM_CLIENT") && error.contains("not-a-provider"),
+        "error must name the offending client, got: {}",
+        error
+    );
 }
