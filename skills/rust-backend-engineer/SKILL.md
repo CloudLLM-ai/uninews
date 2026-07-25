@@ -111,15 +111,17 @@ When creating enums for domain modeling:
 
 ## Testing Standards
 
-All new functionality MUST have tests in the `/tests` folder (integration tests) or inline `#[cfg(test)]` modules for unit tests.
+**Project convention (since 0.44.0): tests live in `/tests`, never in `src/`.**
 
-- **Integration tests** go in `/tests/` as separate files, exercising the crate strictly through its public (or `#[doc(hidden)] pub`) surface.
-- **Unit tests** live in `#[cfg(test)] mod tests` at the bottom of the source file.
+- **All tests are integration tests** — one `tests/<topic>.rs` file per behavior, exercising the crate strictly through its public (or `#[doc(hidden)] pub`) surface.
+- **NEVER** add `#[cfg(test)] mod tests { ... }` blocks to source files. The crate's unit tests were deliberately moved out of `src/` in 0.44.0 — do not reintroduce them.
+- If a helper is private and a test needs it, raise its visibility to `#[doc(hidden)] pub` rather than adding a test-only escape hatch in `src/`.
 - Tests are documented with `///` comments explaining what behavior they verify.
 - Use descriptive test names: `test_order_status_roundtrips_through_string` not `test1`.
 - Test both happy paths and error cases. Test edge cases and boundary conditions.
 - For enums: always test `Display`/`FromStr` roundtripping and invalid input rejection.
-- For network-adjacent logic, prefer hermetic tests: serve fixture responses from a loopback `TcpListener` instead of hitting the real network.
+- For network-adjacent logic, prefer hermetic tests: serve fixture responses from a loopback `TcpListener` instead of hitting the real network (see `tests/archive_fallback.rs` and `tests/playwright_fallback.rs` for the established pattern).
+- Live-network tests (real X/Twitter URLs, real LLM calls) are marked `#[ignore]` and run only with `--ignored` plus credentials in the environment.
 - When tests mutate process-wide state (env vars, global listeners), serialize them with a `static` `Mutex` and restore state via an RAII guard.
 
 ## Performance Optimization
@@ -135,14 +137,15 @@ Once code is correct and tested:
 7. **Cache expensive computations** — use `once_cell::sync::Lazy` or `std::sync::OnceLock` (e.g. parse CSS selectors or regexes once, not per call; a const slice scan often beats a per-call `HashSet`).
 8. **Benchmark before optimizing** — use `criterion` for microbenchmarks, `tracing` for latency measurement.
 
-## Project-Specific Context (Axum + sqlx)
+## Project Context (uninews)
 
-- Axum 0.7: `FromRequestParts` requires `#[async_trait]` on impl blocks.
-- `FromRef<AppState>` is needed for extracting `PgPool` from state in custom extractors.
-- Database schema uses `CREATE TABLE IF NOT EXISTS` — no migration files.
-- For adding columns: use `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`.
-- Social networks are looked up by name string, not ID.
-- Never hardcode reference table IDs in frontend — always JOIN and use `display_name` from API.
+- **Published crates.io library** — semver discipline is mandatory: no breaking changes to the public API in patch/minor releases. `lib.rs` is crate docs + core types + re-exports; everything else defaults to `pub(crate)`.
+- **Every user-visible change gets a `changelog.txt` entry** under the version being prepared (format: `X.Y.Z MON/DD/YYYY`), and the README is updated when behavior, env vars, or the fallback chain change.
+- **Scrape fallback chain** (see `web.rs`, `browser.rs`, `archive.rs`): plain HTTP fetch → Playwright Chromium render (bot-protection walls; `UNINEWS_PLAYWRIGHT=0` disables) → archive.org Wayback snapshot. X/Twitter URLs have their own chain in `x.rs`. Keep the ordering and trigger conditions documented wherever they are implemented.
+- **Configuration is env-var driven** (`UNINEWS_*`, plus provider keys consumed by `cloudllm`): each knob is a `&str` env name exposed as a `pub const`, parsed defensively (bad values fall back to defaults, never panic), and documented in the README.
+- **Progress is a typed event stream** (`events.rs`): serde-serializable `ScrapeEvent` enum delivered through one process-wide listener (`set_event_listener`); multiplexing is the caller's job; listener panics are caught and never abort a scrape. New pipeline stages must emit matching events.
+- **LLM Markdown conversion** (`llm.rs`) goes through `cloudllm` — never hand-roll provider clients; context-window budgeting lives there too.
+- Downstream consumers (dbtc_canuto, dbtc_scout in the diariobitcoin workspace) depend on the published crate — treat `universal_scrape`, the event vocabulary, and env-var names as stable contracts.
 
 ## Workflow
 
@@ -150,7 +153,7 @@ Once code is correct and tested:
 2. **Design types first** — define structs, enums, and traits before writing logic.
 3. **Implement with immutability and composability** — small functions, no unnecessary mutation.
 4. **Document everything** — doc comments with examples on all public items.
-5. **Write tests** — both unit and integration, covering happy paths, errors, and edge cases.
+5. **Write tests** — integration tests in `/tests` (never `#[cfg(test)]` in `src/`), covering happy paths, errors, and edge cases; hermetic loopback fixtures over live network.
 6. **Review for hot paths** — once correct, optimize allocation patterns and data flow.
 7. **Review for security** — timeouts on all I/O, no panics on untrusted input, secrets never logged, defensive callback invocation.
 8. **Self-review** — before presenting code, verify: Are all types documented? Are there tests? Is mutation minimized? Are strings eliminated in favor of enums? Are errors properly typed? Are HTTP clients shared and time-bounded?
