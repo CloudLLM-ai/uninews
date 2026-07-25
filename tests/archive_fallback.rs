@@ -12,7 +12,9 @@ use uninews::archive::{
     archive_fallback_enabled, looks_like_bot_protection, parse_availability_response,
     UNINEWS_ARCHIVE_FALLBACK_ENV,
 };
-use uninews::{set_event_listener, universal_scrape, ScrapeEvent};
+use uninews::{
+    playwright_enabled, set_event_listener, universal_scrape, ScrapeEvent, UNINEWS_PLAYWRIGHT_ENV,
+};
 
 /// Serializes tests that mutate `UNINEWS_ARCHIVE_FALLBACK`.
 static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -82,6 +84,28 @@ fn archive_fallback_stays_enabled_for_other_values() {
         assert!(
             archive_fallback_enabled(),
             "value {:?} should keep the fallback enabled",
+            value
+        );
+    }
+}
+
+// ── playwright_enabled ────────────────────────────────────────────────────
+
+#[test]
+fn playwright_is_enabled_by_default() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _guard = EnvVarGuard::unset(UNINEWS_PLAYWRIGHT_ENV);
+    assert!(playwright_enabled());
+}
+
+#[test]
+fn playwright_is_disabled_by_falsy_values() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    for value in ["0", "false", "FALSE", "no", "off", " Off "] {
+        let _guard = EnvVarGuard::set(UNINEWS_PLAYWRIGHT_ENV, value);
+        assert!(
+            !playwright_enabled(),
+            "value {:?} should disable Playwright",
             value
         );
     }
@@ -221,6 +245,12 @@ fn spawn_cloudflare_challenge_server() -> String {
 /// what it pins down is detection + orchestration + event emission.
 #[tokio::test]
 async fn cloudflare_challenge_triggers_archive_fallback_events() {
+    // Disable Playwright so this test isolates the archive.org path without
+    // launching a real browser (slow, needs Node + Chromium, flaky in CI).
+    // Do not hold ENV_LOCK across the await (std::Mutex is not Send-friendly
+    // with tokio); EnvVarGuard alone is enough for this serial e2e case.
+    let _pw_guard = EnvVarGuard::set(UNINEWS_PLAYWRIGHT_ENV, "0");
+
     // NOTE: this test is the only event-listener user in this test binary,
     // so no guard is needed around the process-wide listener slot (and a
     // std::Mutex guard must not be held across the await below anyway).
@@ -258,11 +288,17 @@ async fn cloudflare_challenge_triggers_archive_fallback_events() {
         "expected ArchiveFallbackStarted, got: {:?}",
         *recorded
     );
+    // Snapshot found/not-found is preferred; rate-limited / network lookup
+    // failures (HTTP 429 from archive.org) still count as a completed
+    // fallback attempt — they surface only via ScrapeFailed + error text.
+    let snapshot_outcome = has(|e| matches!(e, ScrapeEvent::ArchiveSnapshotNotFound { .. }))
+        || has(|e| matches!(e, ScrapeEvent::ArchiveSnapshotFound { .. }));
+    let lookup_failed_in_error = post.error.contains("archive.org lookup failed");
     assert!(
-        has(|e| matches!(e, ScrapeEvent::ArchiveSnapshotNotFound { .. }))
-            || has(|e| matches!(e, ScrapeEvent::ArchiveSnapshotFound { .. })),
-        "expected an archive snapshot outcome event, got: {:?}",
-        *recorded
+        snapshot_outcome || lookup_failed_in_error,
+        "expected an archive snapshot outcome event or a lookup failure, got events={:?} error={}",
+        *recorded,
+        post.error
     );
     assert!(
         has(|e| matches!(e, ScrapeEvent::ScrapeFailed { .. })),

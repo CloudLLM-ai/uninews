@@ -116,3 +116,28 @@ fn archive_fallback_events_serialize() {
     assert_eq!(json["event"], "archive_snapshot_found");
     assert_eq!(json["timestamp"], "20240101000000");
 }
+
+#[test]
+fn playwright_fallback_events_serialize() {
+    let started = serde_json::to_value(ScrapeEvent::PlaywrightFallbackStarted {
+        url: "https://example.com/cf".to_string(),
+    })
+    .expect("event must serialize");
+    assert_eq!(started["event"], "playwright_fallback_started");
+
+    let ok = serde_json::to_value(ScrapeEvent::PlaywrightFallbackSucceeded {
+        url: "https://example.com/cf".to_string(),
+        body_bytes: 42_000,
+    })
+    .expect("event must serialize");
+    assert_eq!(ok["event"], "playwright_fallback_succeeded");
+    assert_eq!(ok["body_bytes"], 42_000);
+
+    let failed = serde_json::to_value(ScrapeEvent::PlaywrightFallbackFailed {
+        url: "https://example.com/cf".to_string(),
+        error: "still blocked".to_string(),
+    })
+    .expect("event must serialize");
+    assert_eq!(failed["event"], "playwright_fallback_failed");
+    assert_eq!(failed["error"], "still blocked");
+}
