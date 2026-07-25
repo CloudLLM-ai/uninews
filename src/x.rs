@@ -12,6 +12,8 @@
 //! - **Link-only posts** are followed to the external article, which is then
 //!   scraped like any other web URL.
 
+use std::collections::HashSet;
+
 use reqwest::Client;
 use serde::Deserialize;
 
@@ -42,6 +44,7 @@ pub struct XTweet {
     pub(crate) entities: Option<XEntities>,
 }
 
+/// Article metadata embedded in an X API v2 tweet payload.
 #[derive(Deserialize, Debug)]
 pub struct XArticleMeta {
     pub(crate) title: Option<String>,
@@ -84,9 +87,15 @@ struct XTweetResponse {
 }
 
 /// Top-level response for a recent-search query (`GET /2/tweets/search/recent`).
+///
+/// The `errors` field must stay: without it, an X error body
+/// (`{"errors":[...]}`) deserializes cleanly as `data: None` (serde ignores
+/// unknown fields) and a 401/429/shape change silently looks like an empty
+/// thread.
 #[derive(Deserialize, Debug)]
 struct XSearchResponse {
     data: Option<Vec<XTweet>>,
+    errors: Option<Vec<serde_json::Value>>,
 }
 
 /// Response returned by the X app-only token exchange endpoint.
@@ -290,8 +299,11 @@ fn normalize_text_url_token(token: &str) -> Option<String> {
     None
 }
 
+/// Collect the distinct URLs referenced by a tweet (entity URLs plus any
+/// raw `http(s)://` tokens in the text), in first-seen order.
 fn x_text_urls(tweet: &XTweet) -> Vec<String> {
-    let mut urls = Vec::new();
+    let mut urls: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
 
     if let Some(entity_urls) = tweet
         .entities
@@ -304,7 +316,7 @@ fn x_text_urls(tweet: &XTweet) -> Vec<String> {
                 .flatten()
             {
                 let candidate = candidate.trim();
-                if !candidate.is_empty() && !urls.iter().any(|url| url == candidate) {
+                if !candidate.is_empty() && seen.insert(candidate.to_string()) {
                     urls.push(candidate.to_string());
                 }
             }
@@ -313,7 +325,7 @@ fn x_text_urls(tweet: &XTweet) -> Vec<String> {
 
     for token in tweet.text.split_whitespace() {
         if let Some(candidate) = normalize_text_url_token(token) {
-            if !urls.iter().any(|url| url == &candidate) {
+            if seen.insert(candidate.clone()) {
                 urls.push(candidate);
             }
         }
@@ -322,13 +334,22 @@ fn x_text_urls(tweet: &XTweet) -> Vec<String> {
     urls
 }
 
+/// Returns the first external article URL in `urls` (skipping `t.co`
+/// shortlinks and X status links).
+fn x_linked_article_url_in(urls: &[String]) -> Option<String> {
+    urls.iter()
+        .find(|candidate| {
+            !candidate.is_empty()
+                && !candidate.starts_with("https://t.co/")
+                && !candidate.starts_with("http://t.co/")
+                && !x_url_is_status_link(candidate)
+        })
+        .cloned()
+}
+
+/// Returns the first external article URL referenced by `tweet`, if any.
 pub fn x_linked_article_url(tweet: &XTweet) -> Option<String> {
-    x_text_urls(tweet).into_iter().find(|candidate| {
-        !candidate.is_empty()
-            && !candidate.starts_with("https://t.co/")
-            && !candidate.starts_with("http://t.co/")
-            && !x_url_is_status_link(candidate)
-    })
+    x_linked_article_url_in(&x_text_urls(tweet))
 }
 
 async fn resolve_url_redirect(client: &Client, url: &str) -> Option<String> {
@@ -346,13 +367,17 @@ async fn resolve_url_redirect(client: &Client, url: &str) -> Option<String> {
     Some(final_url)
 }
 
-async fn resolve_x_linked_article_url(client: &Client, tweet: &XTweet) -> Option<String> {
-    if let Some(article_url) = x_linked_article_url(tweet) {
+/// Resolve the external article URL for a link-only tweet, following
+/// redirects on the tweet's `t.co` shortlinks when no expanded URL is
+/// present. `urls` must come from [`x_text_urls`] so the list is computed
+/// once per scrape.
+async fn resolve_x_linked_article_url(client: &Client, urls: &[String]) -> Option<String> {
+    if let Some(article_url) = x_linked_article_url_in(urls) {
         return Some(article_url);
     }
 
-    for candidate in x_text_urls(tweet) {
-        if let Some(resolved_url) = resolve_url_redirect(client, &candidate).await {
+    for candidate in urls {
+        if let Some(resolved_url) = resolve_url_redirect(client, candidate).await {
             return Some(resolved_url);
         }
     }
@@ -360,20 +385,29 @@ async fn resolve_x_linked_article_url(client: &Client, tweet: &XTweet) -> Option
     None
 }
 
-fn x_text_without_urls(tweet: &XTweet) -> String {
+/// Returns the tweet text with every URL in `urls` blanked out.
+fn x_text_without_urls(tweet: &XTweet, urls: &[String]) -> String {
     let mut text = tweet.text.clone();
 
-    for candidate in x_text_urls(tweet) {
-        text = text.replace(&candidate, " ");
+    for candidate in urls {
+        text = text.replace(candidate, " ");
     }
 
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-pub fn x_post_is_link_only(tweet: &XTweet) -> bool {
-    x_text_without_urls(tweet).trim().is_empty()
+/// Link-only check against a precomputed URL list (see [`x_text_urls`]).
+fn x_post_is_link_only_with_urls(tweet: &XTweet, urls: &[String]) -> bool {
+    x_text_without_urls(tweet, urls).trim().is_empty()
 }
 
+/// Returns `true` when the tweet text contains nothing but URLs.
+pub fn x_post_is_link_only(tweet: &XTweet) -> bool {
+    x_post_is_link_only_with_urls(tweet, &x_text_urls(tweet))
+}
+
+/// Returns the article body (`plain_text`, falling back to `preview_text`),
+/// trimmed, or `None` when both are empty.
 pub fn x_article_plain_text(article: &XArticleMeta) -> Option<String> {
     article
         .plain_text
@@ -418,6 +452,7 @@ fn x_web_article_body(article: &XWebArticle) -> Option<String> {
     }
 }
 
+/// Parse an X web-GraphQL `TweetResultByRestId` response body into a [`Post`].
 pub fn parse_x_web_article_post(
     body: &str,
     title_override: Option<&str>,
@@ -486,21 +521,47 @@ pub fn parse_x_web_article_post(
 }
 
 async fn resolve_x_guest_token(client: &Client) -> Result<String, String> {
-    let response = client
-        .post("https://api.x.com/1.1/guest/activate.json")
+    const GUEST_ACTIVATE_URL: &str = "https://api.x.com/1.1/guest/activate.json";
+    emit_event(ScrapeEvent::FetchStarted {
+        url: GUEST_ACTIVATE_URL.to_string(),
+    });
+    let response = match client
+        .post(GUEST_ACTIVATE_URL)
         .header("Authorization", format!("Bearer {}", X_WEB_BEARER_TOKEN))
         .header("x-twitter-active-user", "yes")
         .header("x-twitter-client-language", "en")
         .send()
         .await
-        .map_err(|error| format!("Failed to activate X guest token: {}", error))?;
+    {
+        Ok(response) => response,
+        Err(error) => {
+            let message = format!("Failed to activate X guest token: {}", error);
+            emit_event(ScrapeEvent::FetchFailed {
+                url: GUEST_ACTIVATE_URL.to_string(),
+                error: message.clone(),
+            });
+            return Err(message);
+        }
+    };
 
     let status = response.status();
-    let body = response
-        .text()
-        .await
-        .map_err(|error| format!("Failed to read X guest token response: {}", error))?;
+    let body = match response.text().await {
+        Ok(body) => body,
+        Err(error) => {
+            let message = format!("Failed to read X guest token response: {}", error);
+            emit_event(ScrapeEvent::FetchFailed {
+                url: GUEST_ACTIVATE_URL.to_string(),
+                error: message.clone(),
+            });
+            return Err(message);
+        }
+    };
     x_debug_dump("X guest token JSON", &body);
+    emit_event(ScrapeEvent::FetchSucceeded {
+        url: GUEST_ACTIVATE_URL.to_string(),
+        status: status.as_u16(),
+        body_bytes: body.len(),
+    });
 
     if !status.is_success() {
         let message = x_api_error_message(&body).unwrap_or_else(|| summarize_body(&body, 400));
@@ -566,7 +627,11 @@ async fn scrape_x_article_from_web_graphql(
     )
     .map_err(|error| format!("Failed to build X web GraphQL URL: {}", error))?;
 
-    let response = client
+    let graphql_url = endpoint.to_string();
+    emit_event(ScrapeEvent::FetchStarted {
+        url: graphql_url.clone(),
+    });
+    let response = match client
         .get(endpoint)
         .header("Authorization", format!("Bearer {}", X_WEB_BEARER_TOKEN))
         .header("x-guest-token", guest_token)
@@ -574,14 +639,36 @@ async fn scrape_x_article_from_web_graphql(
         .header("x-twitter-client-language", "en")
         .send()
         .await
-        .map_err(|error| format!("Failed to fetch X article via web GraphQL: {}", error))?;
+    {
+        Ok(response) => response,
+        Err(error) => {
+            let message = format!("Failed to fetch X article via web GraphQL: {}", error);
+            emit_event(ScrapeEvent::FetchFailed {
+                url: graphql_url.clone(),
+                error: message.clone(),
+            });
+            return Err(message);
+        }
+    };
 
     let status = response.status();
-    let body = response
-        .text()
-        .await
-        .map_err(|error| format!("Failed to read X web GraphQL response body: {}", error))?;
+    let body = match response.text().await {
+        Ok(body) => body,
+        Err(error) => {
+            let message = format!("Failed to read X web GraphQL response body: {}", error);
+            emit_event(ScrapeEvent::FetchFailed {
+                url: graphql_url.clone(),
+                error: message.clone(),
+            });
+            return Err(message);
+        }
+    };
     x_debug_dump("X web GraphQL JSON", &body);
+    emit_event(ScrapeEvent::FetchSucceeded {
+        url: graphql_url,
+        status: status.as_u16(),
+        body_bytes: body.len(),
+    });
 
     if !status.is_success() {
         let message = x_api_error_message(&body).unwrap_or_else(|| summarize_body(&body, 400));
@@ -666,6 +753,173 @@ pub fn x_bearer_token_parse_error(error: &serde_json::Error) -> String {
     format!("Failed to parse X bearer token response: {}", error)
 }
 
+/// Build a [`Post`] carrying only an error message (mirrors `web::error_post`).
+fn x_error_post(error: String) -> Post {
+    Post {
+        title: String::new(),
+        content: String::new(),
+        featured_image_url: String::new(),
+        publication_date: None,
+        author: None,
+        error,
+    }
+}
+
+/// Convert a scraped post to Markdown, attaching the conversion error to
+/// the pre-conversion post on failure (mirrors the `web.rs` pattern).
+///
+/// `convert_content_to_markdown` consumes the post and drops it on error,
+/// so the clone below is the price of keeping the original available for
+/// the error arm; removing it entirely requires `llm.rs` to hand the post
+/// back on failure (out of scope here).
+async fn markdown_or_error_post(
+    post: Post,
+    language: &str,
+    context_window_tokens: Option<usize>,
+) -> Post {
+    match convert_content_to_markdown(post.clone(), language, context_window_tokens).await {
+        Ok(markdown_post) => markdown_post,
+        Err(error) => Post { error, ..post },
+    }
+}
+
+/// Parse a recent-search response body into its tweet list.
+///
+/// X error bodies (`{"errors":[...]}`) would otherwise deserialize cleanly
+/// as `XSearchResponse { data: None }` (serde ignores unknown fields),
+/// silently turning 401s/429s/shape changes into an empty thread.
+#[doc(hidden)]
+pub fn parse_x_search_tweets(body: &str) -> Result<Vec<XTweet>, String> {
+    let response: XSearchResponse = serde_json::from_str(body).map_err(|error| {
+        format!(
+            "Failed to parse X recent-search response: {} ({})",
+            error,
+            summarize_body(body, 400)
+        )
+    })?;
+
+    if let Some(errors) = response.errors.as_ref().filter(|errors| !errors.is_empty()) {
+        let message = errors
+            .first()
+            .and_then(|error| error.get("detail").or_else(|| error.get("message")))
+            .and_then(|value| value.as_str())
+            .unwrap_or("Unknown X API error");
+        return Err(format!("X recent-search API error: {}", message));
+    }
+
+    Ok(response.data.unwrap_or_default())
+}
+
+/// Follow a link-only tweet to its article and scrape it.
+///
+/// Resolution order: the article body embedded in the v2 tweet payload,
+/// then X's web GraphQL endpoint for X Article links (with an HTML scrape
+/// fallback), then a plain HTML scrape of the linked article. Returns
+/// `None` when the tweet carries no resolvable external article URL, in
+/// which case the caller falls back to treating it as a regular tweet.
+async fn scrape_link_only_tweet(
+    client: &Client,
+    root_tweet: &XTweet,
+    root_urls: &[String],
+    author_display: Option<String>,
+    profile_image: String,
+    language: &str,
+    context_window_tokens: Option<usize>,
+) -> Option<Post> {
+    let article_title_override = root_tweet
+        .article
+        .as_ref()
+        .and_then(|article| article.title.as_deref());
+    let embedded_article_body = root_tweet.article.as_ref().and_then(x_article_plain_text);
+
+    if let Some(content) = embedded_article_body {
+        let scraped_article_post = Post {
+            title: article_title_override
+                .map(str::trim)
+                .filter(|title| !title.is_empty())
+                .unwrap_or("X article")
+                .to_string(),
+            content,
+            featured_image_url: profile_image,
+            publication_date: root_tweet.created_at.clone(),
+            author: author_display,
+            error: String::new(),
+        };
+
+        return Some(
+            markdown_or_error_post(scraped_article_post, language, context_window_tokens).await,
+        );
+    }
+
+    let article_url = resolve_x_linked_article_url(client, root_urls).await?;
+
+    if is_x_article_url(&article_url) {
+        match scrape_x_article_from_web_graphql(
+            client,
+            &root_tweet.id,
+            article_title_override,
+            root_tweet.created_at.clone(),
+            author_display.clone(),
+        )
+        .await
+        {
+            Ok(scraped_article_post) => {
+                return Some(
+                    markdown_or_error_post(scraped_article_post, language, context_window_tokens)
+                        .await,
+                );
+            }
+            Err(graphql_error) => {
+                let article_post = scrape_web_url_with_title_override(
+                    &article_url,
+                    language,
+                    article_title_override,
+                    context_window_tokens,
+                )
+                .await;
+                if article_post.error.is_empty() {
+                    return Some(article_post);
+                }
+
+                return Some(Post {
+                    title: article_post.title,
+                    content: article_post.content,
+                    featured_image_url: article_post.featured_image_url,
+                    publication_date: article_post.publication_date,
+                    author: article_post.author,
+                    error: format!(
+                        "Failed to scrape linked X article {} via X web GraphQL: {}. HTML fallback failed: {}",
+                        article_url, graphql_error, article_post.error
+                    ),
+                });
+            }
+        }
+    }
+
+    let article_post = scrape_web_url_with_title_override(
+        &article_url,
+        language,
+        article_title_override,
+        context_window_tokens,
+    )
+    .await;
+    if article_post.error.is_empty() {
+        return Some(article_post);
+    }
+
+    Some(Post {
+        title: article_post.title,
+        content: article_post.content,
+        featured_image_url: article_post.featured_image_url,
+        publication_date: article_post.publication_date,
+        author: article_post.author,
+        error: format!(
+            "Failed to scrape linked article {}: {}",
+            article_url, article_post.error
+        ),
+    })
+}
+
 /// Fetches a tweet or X thread via the Twitter/X API v2 and returns a [`Post`].
 ///
 /// # Authentication
@@ -695,14 +949,10 @@ pub(crate) async fn scrape_x_url(
     let tweet_id = match extract_tweet_id(url) {
         Some(id) => id,
         None => {
-            return Post {
-                title: String::new(),
-                content: String::new(),
-                featured_image_url: String::new(),
-                publication_date: None,
-                author: None,
-                error: format!("Could not extract a tweet ID from the URL: {}", url),
-            };
+            return x_error_post(format!(
+                "Could not extract a tweet ID from the URL: {}",
+                url
+            ));
         }
     };
 
@@ -712,16 +962,7 @@ pub(crate) async fn scrape_x_url(
     // ── 3. Resolve the Bearer Token ──────────────────────────────────────────
     let bearer_token = match resolve_x_bearer_token(client).await {
         Ok(token) => token,
-        Err(error) => {
-            return Post {
-                title: String::new(),
-                content: String::new(),
-                featured_image_url: String::new(),
-                publication_date: None,
-                author: None,
-                error,
-            };
-        }
+        Err(error) => return x_error_post(error),
     };
 
     let auth_header = format!("Bearer {}", bearer_token);
@@ -746,14 +987,7 @@ pub(crate) async fn scrape_x_url(
                 url: root_tweet_url.clone(),
                 error: e.to_string(),
             });
-            return Post {
-                title: String::new(),
-                content: String::new(),
-                featured_image_url: String::new(),
-                publication_date: None,
-                author: None,
-                error: format!("Failed to call X API: {}", e),
-            };
+            return x_error_post(format!("Failed to call X API: {}", e));
         }
     };
 
@@ -765,14 +999,7 @@ pub(crate) async fn scrape_x_url(
                 url: root_tweet_url.clone(),
                 error: format!("Failed to read X API response body: {}", e),
             });
-            return Post {
-                title: String::new(),
-                content: String::new(),
-                featured_image_url: String::new(),
-                publication_date: None,
-                author: None,
-                error: format!("Failed to read X API response body: {}", e),
-            };
+            return x_error_post(format!("Failed to read X API response body: {}", e));
         }
     };
     x_debug_dump("X root tweet JSON", &root_body);
@@ -785,31 +1012,17 @@ pub(crate) async fn scrape_x_url(
     if !root_status.is_success() {
         let message =
             x_api_error_message(&root_body).unwrap_or_else(|| summarize_body(&root_body, 400));
-        return Post {
-            title: String::new(),
-            content: String::new(),
-            featured_image_url: String::new(),
-            publication_date: None,
-            author: None,
-            error: format!("X API returned HTTP {}: {}", root_status, message),
-        };
+        return x_error_post(format!("X API returned HTTP {}: {}", root_status, message));
     }
 
     let root_data: XTweetResponse = match serde_json::from_str(&root_body) {
         Ok(d) => d,
         Err(e) => {
-            return Post {
-                title: String::new(),
-                content: String::new(),
-                featured_image_url: String::new(),
-                publication_date: None,
-                author: None,
-                error: format!(
-                    "Failed to parse X API response: {} ({})",
-                    e,
-                    summarize_body(&root_body, 400)
-                ),
-            };
+            return x_error_post(format!(
+                "Failed to parse X API response: {} ({})",
+                e,
+                summarize_body(&root_body, 400)
+            ));
         }
     };
 
@@ -821,31 +1034,17 @@ pub(crate) async fn scrape_x_url(
                 .and_then(|e| e.get("detail").or_else(|| e.get("message")))
                 .and_then(|v| v.as_str())
                 .unwrap_or("Unknown X API error");
-            return Post {
-                title: String::new(),
-                content: String::new(),
-                featured_image_url: String::new(),
-                publication_date: None,
-                author: None,
-                error: format!("X API error: {}", msg),
-            };
+            return x_error_post(format!("X API error: {}", msg));
         }
     }
 
     let root_tweet = match root_data.data {
         Some(t) => t,
         None => {
-            return Post {
-                title: String::new(),
-                content: String::new(),
-                featured_image_url: String::new(),
-                publication_date: None,
-                author: None,
-                error: format!(
-                    "X API returned no tweet data. Response body: {}",
-                    summarize_body(&root_body, 400)
-                ),
-            };
+            return x_error_post(format!(
+                "X API returned no tweet data. Response body: {}",
+                summarize_body(&root_body, 400)
+            ));
         }
     };
 
@@ -867,117 +1066,23 @@ pub(crate) async fn scrape_x_url(
         .clone()
         .unwrap_or_else(|| root_tweet.id.clone());
 
-    if x_post_is_link_only(&root_tweet) {
-        let article_title_override = root_tweet
-            .article
-            .as_ref()
-            .and_then(|article| article.title.as_deref());
-        let embedded_article_body = root_tweet.article.as_ref().and_then(x_article_plain_text);
+    // Compute the tweet's URL list once for the link-only check and the
+    // article resolution below (I9: was recomputed up to 3x per scrape).
+    let root_urls = x_text_urls(&root_tweet);
 
-        if let Some(content) = embedded_article_body {
-            let scraped_article_post = Post {
-                title: article_title_override
-                    .map(str::trim)
-                    .filter(|title| !title.is_empty())
-                    .unwrap_or("X article")
-                    .to_string(),
-                content,
-                featured_image_url: profile_image.clone(),
-                publication_date: root_tweet.created_at.clone(),
-                author: author_display.clone(),
-                error: String::new(),
-            };
-
-            return match convert_content_to_markdown(
-                scraped_article_post.clone(),
-                language,
-                context_window_tokens,
-            )
-            .await
-            {
-                Ok(markdown_post) => markdown_post,
-                Err(err) => Post {
-                    error: err,
-                    ..scraped_article_post
-                },
-            };
-        }
-
-        if let Some(article_url) = resolve_x_linked_article_url(client, &root_tweet).await {
-            if is_x_article_url(&article_url) {
-                match scrape_x_article_from_web_graphql(
-                    client,
-                    &root_tweet.id,
-                    article_title_override,
-                    root_tweet.created_at.clone(),
-                    author_display.clone(),
-                )
-                .await
-                {
-                    Ok(scraped_article_post) => {
-                        return match convert_content_to_markdown(
-                            scraped_article_post.clone(),
-                            language,
-                            context_window_tokens,
-                        )
-                        .await
-                        {
-                            Ok(markdown_post) => markdown_post,
-                            Err(err) => Post {
-                                error: err,
-                                ..scraped_article_post
-                            },
-                        };
-                    }
-                    Err(graphql_error) => {
-                        let article_post = scrape_web_url_with_title_override(
-                            &article_url,
-                            language,
-                            article_title_override,
-                            context_window_tokens,
-                        )
-                        .await;
-                        if article_post.error.is_empty() {
-                            return article_post;
-                        }
-
-                        return Post {
-                            title: article_post.title,
-                            content: article_post.content,
-                            featured_image_url: article_post.featured_image_url,
-                            publication_date: article_post.publication_date,
-                            author: article_post.author,
-                            error: format!(
-                                "Failed to scrape linked X article {} via X web GraphQL: {}. HTML fallback failed: {}",
-                                article_url, graphql_error, article_post.error
-                            ),
-                        };
-                    }
-                }
-            }
-
-            let article_post = scrape_web_url_with_title_override(
-                &article_url,
-                language,
-                article_title_override,
-                context_window_tokens,
-            )
-            .await;
-            if article_post.error.is_empty() {
-                return article_post;
-            }
-
-            return Post {
-                title: article_post.title,
-                content: article_post.content,
-                featured_image_url: article_post.featured_image_url,
-                publication_date: article_post.publication_date,
-                author: article_post.author,
-                error: format!(
-                    "Failed to scrape linked article {}: {}",
-                    article_url, article_post.error
-                ),
-            };
+    if x_post_is_link_only_with_urls(&root_tweet, &root_urls) {
+        if let Some(post) = scrape_link_only_tweet(
+            client,
+            &root_tweet,
+            &root_urls,
+            author_display.clone(),
+            profile_image.clone(),
+            language,
+            context_window_tokens,
+        )
+        .await
+        {
+            return post;
         }
     }
 
@@ -990,33 +1095,69 @@ pub(crate) async fn scrape_x_url(
 
     // Try to fetch the rest of the conversation from the recent-search endpoint.
     // This only covers the last 7 days; for older tweets we fall back to the
-    // single tweet already captured above.
+    // single tweet already captured above. Every failure mode emits a
+    // FetchFailed event (I6): previously 401/429/network errors and X error
+    // JSON all silently degraded the thread to the root tweet.
     let search_url = format!(
         "https://api.x.com/2/tweets/search/recent?query=conversation_id%3A{}&tweet.fields=created_at,author_id,text,entities&max_results=100",
         conversation_id
     );
-    if let Ok(search_resp) = client
+    emit_event(ScrapeEvent::FetchStarted {
+        url: search_url.clone(),
+    });
+    match client
         .get(&search_url)
         .header("Authorization", &auth_header)
         .send()
         .await
     {
-        if let Ok(search_body) = search_resp.text().await {
-            x_debug_dump("X recent search JSON", &search_body);
-            if let Ok(search_data) = serde_json::from_str::<XSearchResponse>(&search_body) {
-                if let Some(tweets) = search_data.data {
-                    for t in tweets {
-                        // Only include tweets from the same author (i.e. the thread,
-                        // not replies from other users). Guard against an empty
-                        // author_id (which would match any tweet lacking the field).
-                        let same_author = !author_id.is_empty()
-                            && t.author_id.as_deref() == Some(author_id.as_str());
-                        if same_author && t.id != root_tweet.id {
-                            thread_tweets.push((t.created_at.unwrap_or_default(), t.text));
+        Ok(search_resp) => {
+            let search_status = search_resp.status();
+            match search_resp.text().await {
+                Ok(search_body) => {
+                    x_debug_dump("X recent search JSON", &search_body);
+                    if search_status.is_success() {
+                        emit_event(ScrapeEvent::FetchSucceeded {
+                            url: search_url.clone(),
+                            status: search_status.as_u16(),
+                            body_bytes: search_body.len(),
+                        });
+                        if let Ok(tweets) = parse_x_search_tweets(&search_body) {
+                            for t in tweets {
+                                // Only include tweets from the same author (i.e. the thread,
+                                // not replies from other users). Guard against an empty
+                                // author_id (which would match any tweet lacking the field).
+                                let same_author = !author_id.is_empty()
+                                    && t.author_id.as_deref() == Some(author_id.as_str());
+                                if same_author && t.id != root_tweet.id {
+                                    thread_tweets.push((t.created_at.unwrap_or_default(), t.text));
+                                }
+                            }
                         }
+                    } else {
+                        emit_event(ScrapeEvent::FetchFailed {
+                            url: search_url.clone(),
+                            error: format!(
+                                "X recent-search returned HTTP {}: {}",
+                                search_status,
+                                summarize_body(&search_body, 400)
+                            ),
+                        });
                     }
                 }
+                Err(e) => {
+                    emit_event(ScrapeEvent::FetchFailed {
+                        url: search_url.clone(),
+                        error: format!("Failed to read X recent-search response body: {}", e),
+                    });
+                }
             }
+        }
+        Err(e) => {
+            emit_event(ScrapeEvent::FetchFailed {
+                url: search_url.clone(),
+                error: e.to_string(),
+            });
         }
     }
 
@@ -1052,11 +1193,5 @@ pub(crate) async fn scrape_x_url(
     };
 
     // ── 7. AI Markdown conversion & optional translation ──────────────────────
-    match convert_content_to_markdown(scraped_post.clone(), language, context_window_tokens).await {
-        Ok(markdown_post) => markdown_post,
-        Err(err) => Post {
-            error: err,
-            ..scraped_post
-        },
-    }
+    markdown_or_error_post(scraped_post, language, context_window_tokens).await
 }

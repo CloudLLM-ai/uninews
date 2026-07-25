@@ -10,9 +10,9 @@
 use serde_json::json;
 use uninews::html::parse_scraped_post_from_html;
 use uninews::x::{
-    extract_tweet_id, is_x_article_url, is_x_url, parse_x_web_article_post,
-    x_article_body_unavailable, x_article_plain_text, x_linked_article_url, x_post_is_link_only,
-    XArticleMeta, XTweet,
+    extract_tweet_id, is_x_article_url, is_x_url, parse_x_search_tweets,
+    parse_x_web_article_post, x_article_body_unavailable, x_article_plain_text,
+    x_linked_article_url, x_post_is_link_only, XArticleMeta, XTweet,
 };
 
 /// Build an `XTweet` carrying a single URL entity, mirroring the relevant
@@ -311,4 +311,42 @@ fn bearer_token_http_error_summarizes_long_bodies() {
         "error must be bounded, got {} chars",
         error.len()
     );
+}
+
+// ── parse_x_search_tweets ─────────────────────────────────────────────────
+
+/// Regression (2026-07-25 review, I6): an X error body (`{"errors":[...]}`)
+/// must NOT parse as a successful empty recent-search response — serde
+/// otherwise ignores the unknown `errors` field and a 401/429/shape change
+/// silently truncates a thread to its root tweet.
+#[test]
+fn parse_x_search_tweets_rejects_x_error_bodies() {
+    let body = r#"{"errors":[{"message":"Could not authenticate you","code":32}]}"#;
+    let error = parse_x_search_tweets(body)
+        .expect_err("X error JSON must not parse as an empty search result");
+    assert!(
+        error.contains("Could not authenticate you"),
+        "error should surface the X error message, got: {}",
+        error
+    );
+}
+
+/// A well-formed recent-search response parses into its tweet list.
+#[test]
+fn parse_x_search_tweets_parses_data_array() {
+    let body = r#"{"data":[{"id":"1","text":"hola mundo","created_at":"2026-07-25T00:00:00.000Z","author_id":"42"}]}"#;
+    let tweets = parse_x_search_tweets(body).expect("valid search response must parse");
+    assert_eq!(tweets.len(), 1);
+    // XTweet fields are crate-private; confirm the text came through via
+    // the public link-only helper ("hola mundo" is not a bare URL).
+    assert!(!x_post_is_link_only(&tweets[0]));
+}
+
+/// A count-only search response (`{"meta":{"result_count":0}}`) is a
+/// legitimate empty result set, not an error.
+#[test]
+fn parse_x_search_tweets_accepts_empty_result_set() {
+    let tweets = parse_x_search_tweets(r#"{"meta":{"result_count":0}}"#)
+        .expect("empty result set must parse");
+    assert!(tweets.is_empty());
 }
