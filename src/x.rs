@@ -626,15 +626,13 @@ async fn resolve_x_bearer_token(client: &Client) -> Result<String, String> {
         .map_err(|e| format!("Failed to read X bearer token response: {}", e))?;
 
     if !status.is_success() {
-        let message = x_api_error_message(&body).unwrap_or(body);
-        return Err(format!(
-            "Failed to obtain X bearer token (status {}): {}",
-            status, message
-        ));
+        return Err(x_bearer_token_http_error(status.as_u16(), &body));
     }
 
+    // Never include the body in this error: on a parse failure the body may
+    // still carry a valid `access_token` (e.g. X renamed another field).
     let token_data: XBearerTokenResponse = serde_json::from_str(&body)
-        .map_err(|e| format!("Failed to parse X bearer token response: {} ({})", e, body))?;
+        .map_err(|e| x_bearer_token_parse_error(&e))?;
 
     if !token_data.token_type.eq_ignore_ascii_case("bearer") {
         return Err(format!(
@@ -644,6 +642,28 @@ async fn resolve_x_bearer_token(client: &Client) -> Result<String, String> {
     }
 
     Ok(token_data.access_token)
+}
+
+/// Build the token-exchange HTTP-failure error. The response body is
+/// untrusted and unbounded, so it is summarized like at every other call
+/// site instead of being embedded whole.
+#[doc(hidden)]
+pub fn x_bearer_token_http_error(status: u16, body: &str) -> String {
+    let message = x_api_error_message(body).unwrap_or_else(|| summarize_body(body, 400));
+    format!(
+        "Failed to obtain X bearer token (status {}): {}",
+        status, message
+    )
+}
+
+/// Build the token-exchange parse-failure error. NEVER includes the
+/// response body: on a parse failure the body may still carry a valid
+/// `access_token` (e.g. X renamed or dropped another field), and this
+/// string flows into `Post::error`, which downstream consumers persist
+/// and display. The serde error alone is diagnostic enough.
+#[doc(hidden)]
+pub fn x_bearer_token_parse_error(error: &serde_json::Error) -> String {
+    format!("Failed to parse X bearer token response: {}", error)
 }
 
 /// Fetches a tweet or X thread via the Twitter/X API v2 and returns a [`Post`].

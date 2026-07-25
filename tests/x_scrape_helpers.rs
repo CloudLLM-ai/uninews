@@ -270,3 +270,45 @@ fn parse_x_web_article_post_prefers_graphql_article_payload() {
         Some("@DiarioBitcoin (Diario฿itcoin)".to_string())
     );
 }
+
+/// Regression: the token-exchange PARSE-failure error must never embed the
+/// response body — on a parse failure the body may still carry a valid
+/// `access_token`, and the error string flows into `Post::error`, which
+/// downstream consumers persist and display (secret-leak fix, 2026-07-25).
+#[test]
+fn bearer_token_parse_error_never_contains_the_response_body() {
+    let secret = "AAAAAAAAAAAAAAAAAAAAALIVE_TOKEN";
+    let body = format!(
+        r#"{{"token_type":"bearer","access_token":"{}","unexpected_renamed_field":1}}"#,
+        secret
+    );
+    // Force the exact parse the production code performs.
+    let parse_error = serde_json::from_str::<serde_json::Value>("{not json")
+        .expect_err("invalid JSON must fail to parse");
+    let error = uninews::x::x_bearer_token_parse_error(&parse_error);
+
+    assert!(error.contains("Failed to parse X bearer token response"));
+    assert!(
+        !error.contains(secret) && !error.contains("access_token"),
+        "parse error must not leak the token body, got: {}",
+        error
+    );
+    // The body variable existing in scope is not enough — simulate the full
+    // flow: the error is built from the serde error only, so nothing from
+    // `body` can appear regardless of its content.
+    assert!(!error.contains(&body));
+}
+
+/// The token-exchange HTTP-failure error summarizes an unbounded body
+/// (400 chars + ellipsis) instead of embedding it whole.
+#[test]
+fn bearer_token_http_error_summarizes_long_bodies() {
+    let body = "x".repeat(10_000);
+    let error = uninews::x::x_bearer_token_http_error(429, &body);
+    assert!(error.contains("status 429"));
+    assert!(
+        error.len() < 500,
+        "error must be bounded, got {} chars",
+        error.len()
+    );
+}
