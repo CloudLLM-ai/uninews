@@ -59,6 +59,40 @@ fn error_post(error: String) -> Post {
     }
 }
 
+/// Maximum response body size accepted from a server, in bytes (16 MiB).
+///
+/// Bodies are read in bounded chunks ([`read_body_bounded`]) so a flooding
+/// server cannot exhaust host memory before the request timeout fires;
+/// oversize bodies fail as a network failure, which keeps them eligible
+/// for the archive.org fallback like any other hard fetch failure.
+const MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
+
+/// Read a response body in bounded chunks, enforcing [`MAX_BODY_BYTES`].
+///
+/// Invalid UTF-8 is replaced with U+FFFD (browsers are equally tolerant);
+/// the previous `Response::text()` behavior differed only for pages
+/// declaring a non-UTF-8 charset, which the LLM conversion downstream
+/// handles equally well via replacement characters.
+async fn read_body_bounded(mut response: reqwest::Response) -> Result<String, String> {
+    let mut body: Vec<u8> = Vec::new();
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) => {
+                if body.len() + chunk.len() > MAX_BODY_BYTES {
+                    return Err(format!(
+                        "Response body exceeded the {} MiB limit",
+                        MAX_BODY_BYTES / (1024 * 1024)
+                    ));
+                }
+                body.extend_from_slice(&chunk);
+            }
+            Ok(None) => break,
+            Err(err) => return Err(format!("Failed to read response body: {}", err)),
+        }
+    }
+    Ok(String::from_utf8_lossy(&body).into_owned())
+}
+
 /// Fetch `url`, parse the HTML body into a [`Post`], and classify any
 /// failure for the archive.org fallback decision.
 ///
@@ -96,15 +130,15 @@ async fn fetch_and_parse(url: &str, title_override: Option<&str>) -> RawFetch {
     let is_x_article = is_x_article_url(&response_url) || is_x_article_url(url);
     let response_status = response.status();
     let response_headers = response.headers().clone();
-    let body_text = match response.text().await {
+    let body_text = match read_body_bounded(response).await {
         Ok(text) => text,
         Err(err) => {
             emit_event(ScrapeEvent::FetchFailed {
                 url: url.to_string(),
-                error: format!("Failed to read response body: {}", err),
+                error: err.clone(),
             });
             return RawFetch {
-                post: error_post(format!("Failed to read response body: {}", err)),
+                post: error_post(err),
                 network_failure: true,
                 server_error: false,
                 bot_protected: false,
