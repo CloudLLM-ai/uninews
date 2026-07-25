@@ -240,6 +240,13 @@ pub fn set_event_listener(listener: Option<ScrapeEventListener>) -> Option<Scrap
 /// cannot deadlock. A panicking listener is caught and logged to stderr —
 /// listener bugs must never abort a scrape.
 ///
+/// Takes the event by value, so call sites allocate the payload strings
+/// even when no listener is registered (the common case in production).
+/// This is a deliberate trade: events are small (a URL + a number or two)
+/// and emitted a handful of times per scrape, so the simpler by-value
+/// signature wins over a lazy-closure API. Revisit only if profiling ever
+/// shows event construction on a hot loop.
+///
 /// Exposed (as `pub` + `#[doc(hidden)]`) so integration tests in
 /// `tests/events.rs` can drive the emitter directly; end users only need
 /// [`set_event_listener`].
