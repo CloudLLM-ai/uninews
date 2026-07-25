@@ -87,7 +87,7 @@ use uninews::universal_scrape;
 /// It uses the `clap` crate for automatic argument parsing and validation.
 #[derive(Parser)]
 #[command(
-    author = "CloudLLM Contributors",
+    author,
     version,
     about = "A universal news scraper that converts articles to Markdown",
     long_about = "Uninews is a powerful CLI tool for scraping news articles from any website \
@@ -150,8 +150,8 @@ struct Args {
 ///
 /// # Error Handling
 ///
-/// Errors are printed to stderr and the program exits cleanly.
-/// No panics or crashes occur even if scraping fails.
+/// Errors are printed to stderr (or carried in the JSON `error` field) and
+/// the program exits with a non-zero status code — never a panic.
 ///
 /// # Examples
 ///
@@ -176,20 +176,27 @@ async fn main() {
     // (default: 256,000 tokens, see `uninews::DEFAULT_LLM_CONTEXT_WINDOW`).
     let post = universal_scrape(&args.url, &args.language, None).await;
 
-    // Check for errors during scraping
-    if !post.error.is_empty() {
-        eprintln!("❌ Error during scraping: {}", post.error);
-        return;
-    }
-
     if args.json {
-        // Serialize the Post object to JSON and print it.
+        // Serialize the Post to JSON even when scraping failed: the `error`
+        // field carries the failure for downstream consumers. The process
+        // still exits non-zero below.
         match serde_json::to_string_pretty(&post) {
             Ok(json) => println!("{}", json),
-            Err(err) => eprintln!("❌ Error serializing to JSON: {}", err),
+            Err(err) => {
+                eprintln!("❌ Error serializing to JSON: {}", err);
+                std::process::exit(1);
+            }
         }
-    } else {
+    } else if post.error.is_empty() {
         // Print the title and Markdown-formatted (and translated) content for human consumption.
         println!("{}\n\n{}", post.title, post.content);
+    } else {
+        eprintln!("❌ Error during scraping: {}", post.error);
+    }
+
+    // A failed scrape must yield a non-zero exit status so shell pipelines
+    // and cron jobs can detect the failure.
+    if !post.error.is_empty() {
+        std::process::exit(1);
     }
 }

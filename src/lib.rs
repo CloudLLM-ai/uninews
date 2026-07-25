@@ -48,7 +48,9 @@
 //!
 //! ## Requirements
 //!
-//! - Set the `OPEN_AI_SECRET` environment variable with your OpenAI API key
+//! - Set the API-key env var for your chosen `UNINEWS_LLM_CLIENT`
+//!   (default: `OPEN_AI_SECRET` for OpenAI; see the
+//!   [Environment Variables](#environment-variables) table below)
 //! - The website must provide proper HTML structure and meta tags for best results
 //!
 //! ## Supported Metadata
@@ -69,6 +71,47 @@
 //! 5. Converts remaining HTML to Markdown using AI while preserving article wording and structure
 //! 6. Optionally translates to the requested language
 //!
+//! ## Fallback Chain
+//!
+//! For non-X URLs, scraping proceeds through an ordered fallback chain —
+//! each stage is only attempted when the previous one fails:
+//!
+//! 1. **Plain HTTP** ([`web`](mod@web) pipeline): a single reqwest fetch,
+//!    HTML cleaning, and metadata extraction.
+//! 2. **Playwright Chromium** (headless, via `playwright-rs`): attempted
+//!    when the plain fetch trips bot-protection heuristics (challenge
+//!    interstitials such as Cloudflare, detected from status code, headers,
+//!    and body markers). The rendered DOM is re-checked; if it still looks
+//!    like a bot wall or yields no usable content, the chain continues.
+//!    Requires Node.js on `PATH` and a one-time Chromium install. Disable
+//!    with `UNINEWS_PLAYWRIGHT=0`; tune the wait budget with
+//!    `UNINEWS_PLAYWRIGHT_TIMEOUT_MS` (default 45,000 ms).
+//! 3. **archive.org Wayback Machine** ([`archive`]): attempted for the
+//!    remaining bot walls and for hard failures — HTTP 5xx responses and
+//!    network errors (connect/read timeouts, DNS, TLS). The latest archived
+//!    snapshot of the URL is fetched and parsed instead. Disable with
+//!    `UNINEWS_ARCHIVE_FALLBACK=0`.
+//!
+//! X.com / Twitter URLs follow their own chain (X API v2 → guest-token web
+//! GraphQL → headless-Chrome `--dump-dom` for guest-walled X Articles; see
+//! the `x` module).
+//!
+//! ## Environment Variables
+//!
+//! | Variable | Purpose | Default |
+//! |---|---|---|
+//! | `UNINEWS_LLM_CLIENT` | LLM provider for HTML → Markdown (`openai`, `openrouter`, `xai`, `grok`, `gemini`, `claude`) | `openai` |
+//! | `UNINEWS_LLM_MODEL` | Model override for the selected provider | provider default |
+//! | `UNINEWS_LLM_CONTEXT_WINDOW` | Context-window budget in tokens | 256,000 |
+//! | `OPEN_AI_SECRET` / `OPENROUTER_API_KEY` / `XAI_API_KEY` / `GEMINI_API_KEY` / `CLAUDE_API_KEY` | API key for the selected `UNINEWS_LLM_CLIENT` | — (required) |
+//! | `UNINEWS_PLAYWRIGHT` | Toggle the Playwright fallback (`0`/`false`/`no`/`off` disables) | enabled |
+//! | `UNINEWS_PLAYWRIGHT_TIMEOUT_MS` | Playwright navigation / content-wait budget in ms | 45,000 |
+//! | `UNINEWS_ARCHIVE_FALLBACK` | Toggle the archive.org Wayback fallback (`0` disables) | enabled |
+//! | `UNINEWS_CHROME_BINARY` | Chrome/Chromium executable for the headless `--dump-dom` path (trusted input — see Security Notes) | auto-detected |
+//! | `UNINEWS_CHROME_USER_DATA_DIR` / `UNINEWS_CHROME_PROFILE_DIR` | Clone a logged-in Chrome profile for guest-walled X Articles | — |
+//! | `X_API_KEY` / `X_API_SECRET` | X API v2 OAuth 2.0 app credentials for tweets/threads (compat fallback: `DBTC_TWITTER_API_KEY` / `DBTC_TWITTER_API_SECRET`) | — (required for X URLs) |
+//! | `UNINEWS_DEBUG_X_JSON` | Verbose X API JSON dumps (`1` enables) | disabled |
+//!
 //! ## Module Map
 //!
 //! - `llm` — LLM provider selection, context-window budgeting, and the
@@ -88,7 +131,11 @@
 //!
 //! - **SSRF**: [`universal_scrape`] fetches arbitrary caller-supplied URLs.
 //!   If you expose it behind a service, validate/allow-list URLs yourself —
-//!   uninews intentionally does not restrict schemes or hosts.
+//!   uninews intentionally does not restrict schemes or hosts. Redirects are
+//!   followed, so caller allow-listing must account for redirect targets,
+//!   not just the original URL. Note also that the Playwright fallback
+//!   **executes the target page's JavaScript** and issues subresource
+//!   requests that bypass the plain `web_client` timeout policy.
 //! - **Secrets**: API keys are only read from environment variables and are
 //!   never written to logs, stderr, or [`Post`] fields.
 //! - **Trusted env vars**: `UNINEWS_CHROME_BINARY` names an executable that
@@ -131,7 +178,7 @@ mod web;
 #[doc(hidden)]
 pub mod x;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 pub use archive::{archive_fallback_enabled, ArchiveSnapshot, UNINEWS_ARCHIVE_FALLBACK_ENV};
 // Re-export Playwright toggles from the private `browser` module so operators
@@ -152,6 +199,9 @@ pub use browser::{
 };
 #[doc(hidden)]
 pub use util::summarize_body;
+/// Re-exported event API. New [`ScrapeEvent`] variants are **additive** in
+/// minor releases — listeners must `match` with a wildcard arm to stay
+/// forward-compatible.
 pub use events::{set_event_listener, ScrapeEvent, ScrapeEventListener};
 pub use llm::{
     active_llm_client, active_provider_label, convert_content_to_markdown, llm_context_window,
@@ -211,7 +261,7 @@ pub use llm::{
 ///     eprintln!("Scraping failed: {}", failed_post.error);
 /// }
 /// ```
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Post {
     /// The article title
     pub title: String,
