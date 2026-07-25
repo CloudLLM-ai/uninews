@@ -126,7 +126,21 @@ pub fn uninews_llm_context_window() -> usize {
 /// [`crate::universal_scrape`].
 #[doc(hidden)]
 pub fn resolve_llm_context_window(context_window_tokens: Option<usize>) -> usize {
-    context_window_tokens.unwrap_or_else(uninews_llm_context_window)
+    match context_window_tokens {
+        // An explicit 0 would make every prompt "exceed" the window and —
+        // worse — drain the just-injected message in cloudllm's
+        // message-granularity trim (silent empty conversion). Reject it the
+        // same way the env-var path rejects non-positive values.
+        Some(0) => {
+            eprintln!(
+                "resolve_llm_context_window: ignoring non-positive override 0; using default {}",
+                DEFAULT_LLM_CONTEXT_WINDOW
+            );
+            uninews_llm_context_window()
+        }
+        Some(value) => value,
+        None => uninews_llm_context_window(),
+    }
 }
 
 /// Build the CloudLLM client selected by `UNINEWS_LLM_CLIENT` / `UNINEWS_LLM_MODEL`.
@@ -443,13 +457,31 @@ pub async fn convert_content_to_markdown(
     // Define a system prompt that instructs the LLM on its role.
     let system_prompt = markdown_system_prompt(lang);
 
-    // Create a new LLMSession.
-    let mut session = LLMSession::new(client, system_prompt, context_window);
-
     // Serialize the entire Post to JSON.
     let post_json = serde_json::to_string(&post)
         .map_err(|e| format!("Failed to serialize Post to JSON: {}", e))?;
     let user_prompt = markdown_user_prompt(lang, &post_json);
+
+    // Pre-flight size check. cloudllm trims history at MESSAGE granularity:
+    // when the (only) user message exceeds the window it is drained whole
+    // and the model answers the system prompt alone — the "conversion" then
+    // succeeds with invented content (silent data loss). Fail loudly
+    // instead. Token estimate matches cloudllm's bytes/4 heuristic.
+    let estimated_tokens = (system_prompt.len() + user_prompt.len()) / 4;
+    if estimated_tokens >= context_window {
+        let error = format!(
+            "Post payload (~{} estimated tokens) does not fit the LLM context window ({} tokens); refusing to convert because the article would be silently dropped. Reduce the content size or raise the context window ({}).",
+            estimated_tokens, context_window, UNINEWS_LLM_CONTEXT_WINDOW_ENV
+        );
+        emit_event(ScrapeEvent::LlmConversionFailed {
+            provider,
+            error: error.clone(),
+        });
+        return Err(error);
+    }
+
+    // Create a new LLMSession.
+    let mut session = LLMSession::new(client, system_prompt, context_window);
 
     // Send the prompt to the LLM.
     match session.send_message(Role::User, user_prompt, None).await {

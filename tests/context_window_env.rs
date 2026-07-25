@@ -132,3 +132,14 @@ fn resolve_llm_context_window_uses_default_when_none_and_env_unset() {
     let _guard = EnvVarGuard::unset(UNINEWS_LLM_CONTEXT_WINDOW_ENV);
     assert_eq!(resolve_llm_context_window(None), DEFAULT_LLM_CONTEXT_WINDOW);
 }
+
+/// An explicit 0 override is rejected like the env-var "0" case: a zero
+/// window would make every prompt "exceed" the budget and, pre-fix, let
+/// cloudllm's message-granularity trim drain the article itself (silent
+/// empty conversion). The env value is used instead (here: unset → default).
+#[test]
+fn resolve_llm_context_window_rejects_explicit_zero() {
+    let _env_lock = ENV_LOCK.lock().unwrap();
+    let _guard = EnvVarGuard::unset(UNINEWS_LLM_CONTEXT_WINDOW_ENV);
+    assert_eq!(resolve_llm_context_window(Some(0)), DEFAULT_LLM_CONTEXT_WINDOW);
+}
