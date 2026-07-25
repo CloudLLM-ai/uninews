@@ -1,17 +1,15 @@
 //! Integration tests for the plain-web pipeline in `src/web.rs`, exercised
 //! through the public `universal_scrape` entry point against loopback
 //! servers (hermetic — Playwright and archive.org are disabled so the
-//! plain-fetch behavior is isolated).
+//! plain-fetch behavior is isolated, and UNINEWS_LLM_CLIENT points at a
+//! bogus provider so the LLM stage can never make a live call even if a
+//! stage boundary shifts — this dev shell may export real LLM keys).
 
 use std::env;
 use std::io::Write;
 use std::net::TcpListener;
-use std::sync::Mutex;
 
 use uninews::{universal_scrape, UNINEWS_ARCHIVE_FALLBACK_ENV, UNINEWS_PLAYWRIGHT_ENV};
-
-/// Serializes tests that mutate process-wide env vars.
-static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 /// RAII helper: temporarily override an env var, restore on drop.
 struct EnvVarGuard {
@@ -66,42 +64,36 @@ fn spawn_body_server(status: &str, body_bytes: usize) -> String {
     format!("http://{}", addr)
 }
 
-/// A response body larger than the 16 MiB cap must fail the fetch with a
-/// clear size-limit error (memory-exhaustion protection), not an OOM abort.
-/// The failure classifies as a network failure so the archive.org fallback
-/// would engage — disabled here to keep the test hermetic.
+/// The bounded body reader (`read_body_bounded` in src/web.rs):
+///
+/// 1. A response body larger than the 16 MiB cap must fail the fetch with
+///    a clear size-limit error (memory-exhaustion protection), not an OOM
+///    abort. The failure classifies as a network failure so the archive.org
+///    fallback would engage — disabled here to keep the test hermetic.
+/// 2. A body just under the cap is accepted (the size check is `>`, not
+///    `>=`); served with a 500 so the pipeline stops before the LLM stage.
+///
+/// One test for both scenarios: they mutate the same process-wide env vars,
+/// so running them sequentially under one set of guards avoids holding a
+/// std::Mutex across `.await` (clippy::await_holding_lock).
 #[tokio::test]
-async fn oversized_response_body_fails_with_size_limit_error() {
-    let _lock = ENV_LOCK.lock().expect("env lock");
+async fn bounded_body_reader_caps_oversize_and_accepts_under_cap() {
     let _pw = EnvVarGuard::set(UNINEWS_PLAYWRIGHT_ENV, "0");
     let _archive = EnvVarGuard::set(UNINEWS_ARCHIVE_FALLBACK_ENV, "0");
+    let _llm = EnvVarGuard::set("UNINEWS_LLM_CLIENT", "definitely-not-a-provider");
 
+    // Scenario 1: over the cap -> size-limit error.
     let url = spawn_body_server("200 OK", 17 * 1024 * 1024);
     let post = universal_scrape(&url, "english", None).await;
-
     assert!(
         post.error.contains("16 MiB limit"),
         "expected the size-limit error, got: {}",
         post.error
     );
-}
 
-/// A body just under the cap is accepted by the bounded reader (the size
-/// check is `>`, not `>=`). Served with a 500 so the pipeline stops before
-/// the LLM conversion stage — and UNINEWS_LLM_CLIENT is pointed at a bogus
-/// provider anyway, so even if a stage boundary shifts the LLM stage fails
-/// fast instead of making a live call (this shell may export real keys).
-/// The assertion is only that the bounded reader did not reject the body.
-#[tokio::test]
-async fn body_under_the_cap_is_not_rejected_by_the_bounded_reader() {
-    let _lock = ENV_LOCK.lock().expect("env lock");
-    let _pw = EnvVarGuard::set(UNINEWS_PLAYWRIGHT_ENV, "0");
-    let _archive = EnvVarGuard::set(UNINEWS_ARCHIVE_FALLBACK_ENV, "0");
-    let _llm = EnvVarGuard::set("UNINEWS_LLM_CLIENT", "definitely-not-a-provider");
-
+    // Scenario 2: under the cap -> any error EXCEPT the size-limit one.
     let url = spawn_body_server("500 Internal Server Error", 1024);
     let post = universal_scrape(&url, "english", None).await;
-
     assert!(
         !post.error.is_empty(),
         "a 500 with unparseable body must surface an error"
