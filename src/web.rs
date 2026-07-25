@@ -172,6 +172,17 @@ async fn fetch_and_parse(url: &str, title_override: Option<&str>) -> RawFetch {
     }
 
     let mut scraped_post = parse_scraped_post_from_html(&response_url, &body_text, title_override);
+
+    // A challenge interstitial can still yield *some* extractable text; do
+    // not mistake that for real article content. The override must happen
+    // BEFORE the extraction event so a walled page that yielded junk text
+    // reports ContentExtractionFailed, not a misleading ContentExtracted.
+    if bot_protected && scraped_post.error.is_empty() {
+        scraped_post.error =
+            "The page appears to be behind a bot-protection wall (e.g. a Cloudflare challenge)."
+                .to_string();
+    }
+
     if scraped_post.error.is_empty() {
         emit_event(ScrapeEvent::ContentExtracted {
             url: response_url.clone(),
@@ -182,14 +193,6 @@ async fn fetch_and_parse(url: &str, title_override: Option<&str>) -> RawFetch {
             url: response_url.clone(),
             error: scraped_post.error.clone(),
         });
-    }
-
-    // A challenge interstitial can still yield *some* extractable text; do
-    // not mistake that for real article content.
-    if bot_protected && scraped_post.error.is_empty() {
-        scraped_post.error =
-            "The page appears to be behind a bot-protection wall (e.g. a Cloudflare challenge)."
-                .to_string();
     }
 
     if scraped_post.error.is_empty() || !is_x_article {
@@ -416,13 +419,19 @@ async fn scrape_web_url_raw_with_title_override(url: &str, title_override: Optio
                 ..post_after_playwright
             }
         }
-        Err(lookup_error) => Post {
-            error: format!(
-                "{} (archive.org lookup failed: {})",
-                post_after_playwright.error, lookup_error
-            ),
-            ..post_after_playwright
-        },
+        Err(lookup_error) => {
+            emit_event(ScrapeEvent::ArchiveLookupFailed {
+                url: url.to_string(),
+                error: lookup_error.clone(),
+            });
+            Post {
+                error: format!(
+                    "{} (archive.org lookup failed: {})",
+                    post_after_playwright.error, lookup_error
+                ),
+                ..post_after_playwright
+            }
+        }
     }
 }
 

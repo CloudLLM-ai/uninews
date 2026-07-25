@@ -46,6 +46,10 @@ use serde::Serialize;
 
 /// A snapshot of pipeline progress, emitted by [`emit_event`].
 ///
+/// New variants are **additive** in minor releases; listeners must always
+/// match with a wildcard arm (`_ => ...`) so unknown variants are ignored
+/// gracefully.
+///
 /// The enum is `Serialize` with a snake_case `event` tag so listeners can
 /// forward events as JSON without any mapping of their own:
 ///
@@ -154,6 +158,18 @@ pub enum ScrapeEvent {
     ArchiveSnapshotNotFound {
         /// The original URL.
         url: String,
+    },
+    /// The archive.org availability lookup itself failed (network error,
+    /// rate limiting, or a non-2xx response from archive.org). The
+    /// fallback was engaged — see [`ScrapeEvent::ArchiveFallbackStarted`] —
+    /// but produced no snapshot verdict. Terminal counterpart of
+    /// [`ScrapeEvent::ArchiveSnapshotFound`] /
+    /// [`ScrapeEvent::ArchiveSnapshotNotFound`].
+    ArchiveLookupFailed {
+        /// The original URL.
+        url: String,
+        /// Human-readable failure description.
+        error: String,
     },
     /// The extracted content is about to be sent to the LLM for Markdown
     /// conversion.

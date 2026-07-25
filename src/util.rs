@@ -1,7 +1,10 @@
 //! Small shared helpers used across uninews modules.
 //!
 //! Everything in here is crate-private; public API lives in the top-level
-//! modules (`llm`, `web`, `x`, `events`, `archive`).
+//! modules (`llm`, `web`, `x`, `events`, `archive`). The sole exception is
+//! [`summarize_body`], which is `pub` + `#[doc(hidden)]` so it can be
+//! unit-tested (and potentially re-exported for integration tests) without
+//! becoming part of the documented public API.
 
 use std::env;
 
@@ -10,17 +13,22 @@ use std::env;
 pub(crate) const BROWSER_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
 
 /// Return the value of the first environment variable in `keys` that is set
-/// to a non-empty (after trimming) value.
+/// to a non-empty (after trimming) value. The returned value is trimmed, so
+/// callers never receive leading/trailing whitespace.
 pub(crate) fn first_non_empty_env_var(keys: &[&str]) -> Option<String> {
     keys.iter().find_map(|key| match env::var(key) {
-        Ok(value) if !value.trim().is_empty() => Some(value),
+        Ok(value) if !value.trim().is_empty() => Some(value.trim().to_string()),
         _ => None,
     })
 }
 
 /// Trim `body` and truncate it to at most `max_len` bytes (on a char
 /// boundary), appending an ellipsis when truncation occurs.
-pub(crate) fn summarize_body(body: &str, max_len: usize) -> String {
+///
+/// Exposed (as `pub` + `#[doc(hidden)]`) so the truncation rules can be
+/// unit-tested; not part of the documented public API.
+#[doc(hidden)]
+pub fn summarize_body(body: &str, max_len: usize) -> String {
     let trimmed = body.trim();
     if trimmed.len() <= max_len {
         return trimmed.to_string();

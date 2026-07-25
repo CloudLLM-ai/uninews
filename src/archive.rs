@@ -1,16 +1,20 @@
 //! archive.org Wayback Machine fallback.
 //!
 //! When a page cannot be scraped directly — because a bot-protection wall
-//! (Cloudflare challenge, JavaScript-required interstitial, WAF 403/429)
-//! stands in the way, or because the fetch failed hard (connection error,
-//! timeout, 5xx) — uninews asks the Wayback Machine availability API for the
-//! latest snapshot of the URL and scrapes the snapshot instead.
+//! (a Cloudflare challenge page or JavaScript-required interstitial found
+//! in the body, or a 401/403/429 response accompanied by Cloudflare
+//! headers such as `Server: cloudflare` or `cf-ray` — a bare 403/429
+//! without that evidence does NOT qualify) stands in the way, or because
+//! the fetch failed hard (connection error, timeout, 5xx) — uninews asks
+//! the Wayback Machine availability API for the latest snapshot of the URL
+//! and scrapes the snapshot instead.
 //!
 //! The fallback is **enabled by default**; set `UNINEWS_ARCHIVE_FALLBACK=0`
 //! (or `false`/`no`/`off`) to disable it. Every step is reported through
 //! [`ScrapeEvent::ArchiveFallbackStarted`],
-//! [`ScrapeEvent::ArchiveSnapshotFound`], and
-//! [`ScrapeEvent::ArchiveSnapshotNotFound`].
+//! [`ScrapeEvent::ArchiveSnapshotFound`],
+//! [`ScrapeEvent::ArchiveSnapshotNotFound`], and
+//! [`ScrapeEvent::ArchiveLookupFailed`].
 
 use std::env;
 
@@ -139,7 +143,9 @@ struct WaybackSnapshot {
 ///
 /// A snapshot is usable when it is marked `available`, its capture status is
 /// `200`, and it carries both a URL and a timestamp. `http://` snapshot URLs
-/// are upgraded to `https://`.
+/// are upgraded to `https://`, and URLs pointing anywhere other than
+/// `https://web.archive.org/` are rejected (defense in depth: never follow
+/// a snapshot URL off the Wayback host).
 ///
 /// Exposed (as `pub` + `#[doc(hidden)]`) so integration tests can exercise
 /// the parsing rules without network access.
@@ -163,6 +169,12 @@ pub fn parse_availability_response(body: &str) -> Option<ArchiveSnapshot> {
         .strip_prefix("http://")
         .map(|rest| format!("https://{}", rest))
         .unwrap_or(url);
+
+    // Defense in depth: only ever follow snapshot URLs on the Wayback
+    // host, even though the availability API is queried over TLS.
+    if !url.starts_with("https://web.archive.org/") {
+        return None;
+    }
 
     Some(ArchiveSnapshot { url, timestamp })
 }

@@ -208,6 +208,28 @@ fn returns_none_for_malformed_json() {
     assert_eq!(parse_availability_response("{}"), None);
 }
 
+#[test]
+fn rejects_snapshot_urls_off_the_wayback_host() {
+    // Defense in depth: even a well-formed, available, 200-status snapshot
+    // must be dropped when its URL points off web.archive.org.
+    let off_host = r#"{"archived_snapshots": {"closest": {
+        "available": true,
+        "url": "https://evil.example.com/web/20240101000000/https://example.com/a",
+        "timestamp": "20240101000000",
+        "status": "200"
+    }}}"#;
+    assert_eq!(parse_availability_response(off_host), None);
+
+    // Plain-http off-host URLs must not slip through via the TLS upgrade.
+    let off_host_http = r#"{"archived_snapshots": {"closest": {
+        "available": true,
+        "url": "http://evil.example.com/web/20240101000000/https://example.com/a",
+        "timestamp": "20240101000000",
+        "status": "200"
+    }}}"#;
+    assert_eq!(parse_availability_response(off_host_http), None);
+}
+
 // ── end-to-end: protected page → archive fallback orchestration ───────────
 
 /// Serve a single Cloudflare-style 403 challenge page on a loopback port
@@ -243,7 +265,13 @@ fn spawn_cloudflare_challenge_server() -> String {
 /// hits the real archive.org (a 127.0.0.1 URL has no snapshots), so this
 /// test tolerates both the "not found" and the "lookup failed" outcomes —
 /// what it pins down is detection + orchestration + event emission.
+///
+/// NOTE: deliberately `#[ignore]`d — it hits the REAL archive.org, which
+/// violates the hermetic-test convention and can stall up to the 30s
+/// request timeout on an offline host. Run it explicitly with:
+/// `cargo test --test archive_fallback -- --ignored`.
 #[tokio::test]
+#[ignore = "hits real archive.org"]
 async fn cloudflare_challenge_triggers_archive_fallback_events() {
     // Disable Playwright so this test isolates the archive.org path without
     // launching a real browser (slow, needs Node + Chromium, flaky in CI).
@@ -288,15 +316,15 @@ async fn cloudflare_challenge_triggers_archive_fallback_events() {
         "expected ArchiveFallbackStarted, got: {:?}",
         *recorded
     );
-    // Snapshot found/not-found is preferred; rate-limited / network lookup
-    // failures (HTTP 429 from archive.org) still count as a completed
-    // fallback attempt — they surface only via ScrapeFailed + error text.
+    // Snapshot found/not-found is preferred; a failed availability lookup
+    // (rate limiting / network error talking to archive.org) now surfaces
+    // as a terminal ArchiveLookupFailed event, not just error text.
     let snapshot_outcome = has(|e| matches!(e, ScrapeEvent::ArchiveSnapshotNotFound { .. }))
         || has(|e| matches!(e, ScrapeEvent::ArchiveSnapshotFound { .. }));
-    let lookup_failed_in_error = post.error.contains("archive.org lookup failed");
+    let lookup_failed = has(|e| matches!(e, ScrapeEvent::ArchiveLookupFailed { .. }));
     assert!(
-        snapshot_outcome || lookup_failed_in_error,
-        "expected an archive snapshot outcome event or a lookup failure, got events={:?} error={}",
+        snapshot_outcome || lookup_failed,
+        "expected a terminal archive outcome event (found / not-found / lookup-failed), got events={:?} error={}",
         *recorded,
         post.error
     );

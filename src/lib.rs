@@ -145,6 +145,8 @@ pub use browser::{
     playwright_enabled, DEFAULT_PLAYWRIGHT_TIMEOUT_MS, UNINEWS_PLAYWRIGHT_ENV,
     UNINEWS_PLAYWRIGHT_TIMEOUT_MS_ENV,
 };
+#[doc(hidden)]
+pub use util::summarize_body;
 pub use events::{set_event_listener, ScrapeEvent, ScrapeEventListener};
 pub use llm::{
     active_llm_client, active_provider_label, convert_content_to_markdown, llm_context_window,
