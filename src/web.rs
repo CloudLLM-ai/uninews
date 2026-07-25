@@ -9,9 +9,20 @@
 //! 3. For bot-protection walls (Cloudflare & co.): Playwright Chromium
 //!    render ([`crate::browser::fetch_rendered_dom_with_playwright`]),
 //!    when enabled via `UNINEWS_PLAYWRIGHT` (default on).
-//! 4. For remaining bot-protection walls and hard failures (network errors,
+//! 4. For thin content on an otherwise healthy page: the SAME Playwright
+//!    render, triggered when a successful (2xx), non-walled, non-X
+//!    response either fails content extraction, yields implausibly short
+//!    content (under `MIN_CONTENT_BYTES`, 512 — JS-gated article bodies,
+//!    e.g. longevity.technology returning a title + teaser from a large
+//!    JS-driven page), or has a raw body under `JS_SHELL_MAX_BYTES`
+//!    (16 KiB — JS application shells such as axios.com/technology, where
+//!    the server returns only a script bundle). When the render fails or
+//!    yields nothing usable, the original plain-fetch result is kept, so
+//!    the trigger can never make a scrape worse. Thin-content pages are
+//!    not archive.org-eligible, so this render is their only fallback.
+//! 5. For remaining bot-protection walls and hard failures (network errors,
 //!    5xx): the archive.org Wayback Machine fallback ([`crate::archive`]).
-//! 5. LLM Markdown conversion of the extracted body ([`crate::llm`]).
+//! 6. LLM Markdown conversion of the extracted body ([`crate::llm`]).
 
 use std::error::Error as StdError;
 use std::fmt::Write as _;
@@ -45,6 +56,14 @@ struct RawFetch {
     server_error: bool,
     /// The response looks like a bot-protection wall (Cloudflare & co.).
     bot_protected: bool,
+    /// The server answered with a 2xx status. Drives the thin-content
+    /// Playwright trigger (which must not fire for 4xx/5xx or for fetches
+    /// that never produced a response).
+    status_success: bool,
+    /// Size of the raw response body in bytes (0 when the fetch failed
+    /// before a body was read). Compared against [`JS_SHELL_MAX_BYTES`]
+    /// by the thin-content trigger.
+    body_bytes: usize,
 }
 
 /// Build a [`Post`] carrying only an error message.
@@ -66,6 +85,26 @@ fn error_post(error: String) -> Post {
 /// oversize bodies fail as a network failure, which keeps them eligible
 /// for the archive.org fallback like any other hard fetch failure.
 const MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
+
+/// Raw-body size under which a successful (2xx), non-walled page is
+/// treated as a JavaScript shell and given one Playwright render attempt
+/// (16 KiB).
+///
+/// A real server-rendered news page is never this small; SPA shells such
+/// as axios.com/technology are (~5 KB of markup around a `<script>`
+/// bundle, with no article text or links in the raw HTML). The render
+/// either recovers the JS-produced content or fails cleanly, in which
+/// case the original plain-fetch result is kept — the trigger can never
+/// make a scrape worse.
+const JS_SHELL_MAX_BYTES: usize = 16 * 1024;
+
+/// Minimum extracted content (in bytes) accepted without a render retry.
+/// A real article body is never this short; sub-threshold "successful"
+/// extractions (e.g. longevity.technology returning a title + teaser from
+/// a 534 KB JS-driven page) get the same Playwright retry as outright
+/// extraction failures. The plain result is kept when the render does not
+/// yield usable content, so this can only improve the outcome.
+const MIN_CONTENT_BYTES: usize = 512;
 
 /// Read a response body in bounded chunks, enforcing [`MAX_BODY_BYTES`].
 ///
@@ -123,6 +162,8 @@ async fn fetch_and_parse(url: &str, title_override: Option<&str>) -> RawFetch {
                 network_failure: true,
                 server_error: false,
                 bot_protected: false,
+                status_success: false,
+                body_bytes: 0,
             };
         }
     };
@@ -142,6 +183,8 @@ async fn fetch_and_parse(url: &str, title_override: Option<&str>) -> RawFetch {
                 network_failure: true,
                 server_error: false,
                 bot_protected: false,
+                status_success: false,
+                body_bytes: 0,
             };
         }
     };
@@ -163,6 +206,8 @@ async fn fetch_and_parse(url: &str, title_override: Option<&str>) -> RawFetch {
     }
 
     let server_error = response_status.is_server_error();
+    let status_success = response_status.is_success();
+    let body_bytes = body_text.len();
     let bot_protected =
         looks_like_bot_protection(response_status.as_u16(), &response_headers, &body_text);
     if bot_protected {
@@ -201,6 +246,8 @@ async fn fetch_and_parse(url: &str, title_override: Option<&str>) -> RawFetch {
             network_failure: false,
             server_error,
             bot_protected,
+            status_success,
+            body_bytes,
         };
     }
 
@@ -219,6 +266,8 @@ async fn fetch_and_parse(url: &str, title_override: Option<&str>) -> RawFetch {
                     network_failure: false,
                     server_error,
                     bot_protected,
+                    status_success,
+                    body_bytes,
                 };
             }
 
@@ -233,6 +282,8 @@ async fn fetch_and_parse(url: &str, title_override: Option<&str>) -> RawFetch {
                 network_failure: false,
                 server_error,
                 bot_protected,
+                status_success,
+                body_bytes,
             };
         }
     };
@@ -246,6 +297,8 @@ async fn fetch_and_parse(url: &str, title_override: Option<&str>) -> RawFetch {
             network_failure: false,
             server_error,
             bot_protected,
+            status_success,
+            body_bytes,
         };
     }
 
@@ -258,6 +311,8 @@ async fn fetch_and_parse(url: &str, title_override: Option<&str>) -> RawFetch {
             network_failure: false,
             server_error,
             bot_protected,
+            status_success,
+            body_bytes,
         };
     }
 
@@ -272,13 +327,15 @@ async fn fetch_and_parse(url: &str, title_override: Option<&str>) -> RawFetch {
         network_failure: false,
         server_error,
         bot_protected,
+        status_success,
+        body_bytes,
     }
 }
 
-/// Try Playwright Chromium for a bot-protected page. Returns `Some(post)`
-/// when the rendered DOM yields usable article content; `None` when the
-/// fallback is skipped, fails, or still looks blocked (caller continues to
-/// archive.org).
+/// Try Playwright Chromium for a bot-protected or thin-content page.
+/// Returns `Some(post)` when the rendered DOM yields usable article
+/// content; `None` when the fallback is skipped, fails, or still looks
+/// blocked (caller continues to archive.org or keeps the plain result).
 async fn try_playwright_fallback(
     url: &str,
     title_override: Option<&str>,
@@ -339,27 +396,53 @@ async fn try_playwright_fallback(
 /// Fetch `url` and parse the HTML body into a [`Post`], without any LLM
 /// conversion.
 ///
-/// On failure the returned post carries the error in [`Post::error`]. When
-/// the failure is caused by bot protection, Playwright Chromium is tried
-/// first (unless disabled via `UNINEWS_PLAYWRIGHT=0`). Remaining bot walls
-/// and hard failures (network error, 5xx) then go through the archive.org
-/// Wayback Machine fallback (unless disabled via `UNINEWS_ARCHIVE_FALLBACK=0`).
+/// On failure the returned post carries the error in [`Post::error`].
+/// Playwright Chromium is tried first (unless disabled via
+/// `UNINEWS_PLAYWRIGHT=0`) for bot-protection walls and for thin-content
+/// pages — a successful (2xx), non-walled, non-X response whose extraction
+/// failed or whose raw body is under `JS_SHELL_MAX_BYTES`. When the render
+/// does not yield usable content the original plain-fetch post is kept
+/// untouched. Remaining bot walls and hard failures (network error, 5xx)
+/// then go through the archive.org Wayback Machine fallback (unless
+/// disabled via `UNINEWS_ARCHIVE_FALLBACK=0`); thin-content pages are not
+/// archive-eligible, so Playwright is their only fallback.
 async fn scrape_web_url_raw_with_title_override(url: &str, title_override: Option<&str>) -> Post {
     let raw = fetch_and_parse(url, title_override).await;
-    if raw.post.error.is_empty() {
+
+    // Thin-content trigger: a healthy, non-walled page whose extraction
+    // failed (JS-gated body), whose extracted content is implausibly short
+    // for a real article (`MIN_CONTENT_BYTES` — JS-gated body behind a
+    // large shell page), or whose raw body is too small to be a real
+    // server-rendered article (`JS_SHELL_MAX_BYTES` — JS shell) gets the
+    // same Playwright render the wall path uses. Walled pages carry
+    // markers, so in practice the two conditions are mutually exclusive —
+    // and if both could apply, the wall path below wins by construction
+    // (a walled page never satisfies `thin_content`). X URLs keep their
+    // own dedicated chain.
+    let thin_content = raw.status_success
+        && !raw.bot_protected
+        && !is_x_url(url)
+        && (!raw.post.error.is_empty()
+            || raw.post.content.len() < MIN_CONTENT_BYTES
+            || raw.body_bytes < JS_SHELL_MAX_BYTES);
+
+    if raw.post.error.is_empty() && !thin_content {
         return raw.post;
     }
 
-    // Bot-protection → Playwright before archive.org (fresher content).
+    // Bot-protection / thin content → Playwright before archive.org
+    // (fresher content, and the only fallback thin-content pages get).
     let mut post_after_playwright = raw.post;
-    if raw.bot_protected {
+    if raw.bot_protected || thin_content {
         if let Some(rendered) =
             try_playwright_fallback(url, title_override, &post_after_playwright.error).await
         {
             return rendered;
         }
         // Annotate so the final error chain shows Playwright was attempted.
-        if playwright_enabled() {
+        // A thin-shell page whose plain extraction SUCCEEDED keeps its
+        // empty-error result untouched when the render does not help.
+        if playwright_enabled() && !post_after_playwright.error.is_empty() {
             post_after_playwright.error = format!(
                 "{} (Playwright Chromium fallback did not yield usable content)",
                 post_after_playwright.error

@@ -38,7 +38,7 @@ Options:
 - **Scraping & Cleaning:** Extracts the main content of a news article by targeting the `<article>` tag (or falling back to `<body>`) and removing unwanted elements.
 - **Markdown Conversion:** Uses the [CloudLLM](https://github.com/CloudLLM-ai/cloudllm/tree/main) Rust API to convert the cleaned HTML content into near-lossless Markdown. The LLM provider is pluggable via env vars (see [LLM Providers](#llm-providers)).
 - **X.com / Twitter Support:** Reads individual tweets and full X threads via the X API v2, assembling the thread chronologically before converting it to Markdown.
-- **Playwright Fallback:** Bot-protection walls (Cloudflare challenges and similar) are first retried by rendering the page in headless Chromium via [`playwright-rs`](https://crates.io/crates/playwright-rs). Requires Node.js on `PATH` and a one-time Chromium install (see [Playwright Fallback](#playwright-fallback)). Enabled by default; set `UNINEWS_PLAYWRIGHT=0` to disable.
+- **Playwright Fallback:** Bot-protection walls (Cloudflare challenges and similar) and thin-content pages (a healthy 200 response whose extraction fails, or whose raw HTML is under 16 KiB — JS application shells) are first retried by rendering the page in headless Chromium via [`playwright-rs`](https://crates.io/crates/playwright-rs). Requires Node.js on `PATH` and a one-time Chromium install (see [Playwright Fallback](#playwright-fallback)). Enabled by default; set `UNINEWS_PLAYWRIGHT=0` to disable.
 - **archive.org Fallback:** Pages still blocked after Playwright (or when Playwright is disabled), and pages failing outright (network errors, 5xx), are retried via the latest Wayback Machine snapshot. Enabled by default; set `UNINEWS_ARCHIVE_FALLBACK=0` to disable. See [archive.org Fallback](#archiveorg-fallback).
 - **Progress Events:** Library users can register a single process-wide listener to receive typed `ScrapeEvent`s for every pipeline step — ideal for agents, harnesses, and UIs that need live feedback. See [Progress Events](#progress-events).
 - **Reusable Library:** The `universal_scrape` function is exposed for easy integration into other Rust projects.
@@ -66,6 +66,13 @@ Only **one** listener is supported by design; if you need several consumers, reg
 ## Playwright Fallback
 
 When a plain HTTP fetch hits a **bot-protection wall** (Cloudflare challenge page, JS interstitial, `401`/`403`/`429` with Cloudflare headers), uninews renders the URL in **headless Chromium** through Microsoft Playwright (`playwright-rs`) before falling back to archive.org. That recovers fresh articles that have no usable Wayback snapshot yet (e.g. theblock.co).
+
+The same Playwright render also engages on **thin content** — a successful (2xx), non-walled page that plain extraction can't use:
+
+- **Extraction failure** — the page returns 200 but yields no usable article text (e.g. JS-gated bodies such as longevity.technology, where the plain fetch sees only a title and teaser).
+- **JS shell** — the raw HTML body is under **16 KiB** (`JS_SHELL_MAX_BYTES` in `src/web.rs`). A real server-rendered news page is never that small; SPA shells like axios.com/technology return only a script bundle, so the article links exist solely in the rendered DOM.
+
+If the render fails or yields nothing usable, the original plain-fetch result is kept unchanged — the trigger can never make a scrape worse. Thin-content pages are not archive.org-eligible (the Wayback fallback covers bot walls, network failures, and 5xx only), so this render is their only fallback. Both triggers are governed by the single `UNINEWS_PLAYWRIGHT` toggle; there is no separate env var.
 
 | Variable | Default | Description |
 |---|---|---|
