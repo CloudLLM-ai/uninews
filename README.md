@@ -72,16 +72,20 @@ When a plain HTTP fetch hits a **bot-protection wall** (Cloudflare challenge pag
 | `UNINEWS_PLAYWRIGHT` | on | Set to `0` / `false` / `no` / `off` to skip Playwright. |
 | `UNINEWS_PLAYWRIGHT_TIMEOUT_MS` | `45000` | Navigation + content-wait budget in milliseconds. |
 
-**Runtime requirements** (not pure Cargo):
+**Runtime requirements** (not pure Cargo — also listed under [Installation](#installation)):
 
-1. **Node.js 18+** on `PATH` (Playwright’s driver is a Node server).
-2. **Chromium for Playwright** — install once, matching the driver version bundled by `playwright-rs` (currently 1.61.1):
+1. **Node.js 18+** on `PATH` (Playwright’s driver is a Node server). Check with `node --version`.
+2. **Chromium for Playwright** — install **once** per machine, matching the driver version bundled by `playwright-rs` (currently **1.61.1**):
 
 ```bash
 npx playwright@1.61.1 install chromium
 ```
 
-If Chromium is missing, uninews will attempt `playwright_rs::install_browsers(Some(&["chromium"]))` **once** per process, then retry. Events: `PlaywrightFallbackStarted` / `PlaywrightFallbackSucceeded` / `PlaywrightFallbackFailed`.
+> **Why pin `1.61.1`?** Each `playwright-rs` release bundles a specific Playwright driver. Installing a different major/minor (e.g. bare `npx playwright install chromium`) can download an incompatible browser build and fail at launch. When uninews upgrades `playwright-rs`, re-run the install command with the version noted in that release’s README/changelog.
+
+Browsers land under the Playwright cache (e.g. `~/Library/Caches/ms-playwright` on macOS, `~/.cache/ms-playwright` on Linux). Disk use is roughly a few hundred MB for Chromium alone.
+
+If Chromium is missing at runtime, uninews will attempt `playwright_rs::install_browsers(Some(&["chromium"]))` **once** per process, then retry — but a manual `npx` install is more reliable for servers and CI. Events: `PlaywrightFallbackStarted` / `PlaywrightFallbackSucceeded` / `PlaywrightFallbackFailed`.
 
 ## archive.org Fallback
 
@@ -102,6 +106,19 @@ If you do have Rust installed, follow these steps:
 ```bash
 cargo install uninews
 ```
+
+2. **(Recommended) Install Playwright Chromium for Cloudflare / bot-protected sites:**
+
+Uninews can scrape many sites with plain HTTP alone. For sites behind Cloudflare (and similar walls), it needs a one-time **Playwright Chromium** install plus **Node.js 18+** on your `PATH`. The Chromium build must match the Playwright driver version bundled by `playwright-rs` (currently **1.61.1**):
+
+```bash
+# Requires Node.js 18+ (node/npm/npx on PATH)
+npx playwright@1.61.1 install chromium
+```
+
+Only Chromium is required (not Firefox/WebKit). You only need to run this once per machine (or when upgrading uninews to a release that pins a different Playwright version).
+
+If you skip this step, plain scrapes still work; bot-protected pages fall through to archive.org (or fail if there is no snapshot). You can also disable Playwright entirely with `UNINEWS_PLAYWRIGHT=0`. See [Playwright Fallback](#playwright-fallback) for env vars and auto-install behavior.
 
 If you don't have Rust installed, follow these steps to install Rust and build from source:
 
@@ -130,7 +147,12 @@ make build
 make install
 ```
 
-5. **Run it in the command line:**
+5. **Install Playwright Chromium** (same as step 2 above — required for Cloudflare-protected articles):
+```bash
+npx playwright@1.61.1 install chromium
+```
+
+6. **Run it in the command line:**
 
 OpenAI (default):
 ```bash
