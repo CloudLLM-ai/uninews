@@ -1,3 +1,85 @@
+0.46.0 JUL/25/2026
+- Deep-review hardening release (5 Critical + 19 Important findings from a
+  full-crate audit — idioms, docs, security, hot-path performance,
+  reliability) plus the thin-content Playwright trigger.
+
+  NEW:
+- Thin-content Playwright trigger: the Chromium render (previously only
+  for bot-protection walls) now also engages on healthy 200 responses when
+  extraction fails, yields under 512 bytes (JS-gated bodies, e.g.
+  longevity.technology), or the raw body is under 16 KiB (JS shells, e.g.
+  axios.com/technology). Same mechanism, same events, plain result kept
+  when the render does not help. No new env var.
+- `ScrapeEvent::ArchiveLookupFailed { url, error }` (additive): archive.org
+  lookup failures no longer leave the fallback unresolved in the stream.
+- `UNINEWS_PLAYWRIGHT_AUTOINSTALL` (=0 opts out of the runtime Chromium
+  install; default on; install now bounded by a 10-minute timeout).
+- `Post` derives `Deserialize` (CLI JSON round-trips downstream).
+- Crate docs: "Fallback Chain" section + consolidated "Environment
+  Variables" table; README updated for the new trigger.
+
+  SECURITY (critical):
+- `web`: response bodies are read in bounded 16 MiB chunks — a flooding
+  server could previously OOM-abort the host process inside the timeout.
+- `html`: text nodes are entity-escaped on output — `&lt;script&gt;`-style
+  source text could previously re-enter the "cleaned HTML" as live markup.
+- `html`: the cleaner is now an iterative traversal — pathologically deep
+  attacker DOM nesting could previously stack-overflow (abort) the process.
+- `x`: the OAuth token-exchange error paths never embed the response body
+  anymore — a parse failure could previously leak a live `access_token`
+  into `Post::error`.
+- `llm`: conversion refuses payloads that cannot fit the context window
+  (cloudllm's message-granularity trim would drain the article and report
+  a SUCCESSFUL conversion of an empty request — silent data loss);
+  `resolve_llm_context_window(Some(0))` is rejected.
+- `llm`: prompt-injection hardening — the Post JSON is wrapped in
+  <post_json> delimiters and the system prompt instructs the model to
+  treat it strictly as untrusted data.
+- Docs: Security Notes disclose redirect-following and that the Playwright
+  path executes the target page's JavaScript; archive snapshot URLs are
+  pinned to web.archive.org; the auto-install's Linux `--with-deps`
+  (system package installs) side effect is documented.
+
+  RELIABILITY:
+- `browser`: every Playwright/Chrome wait is now bounded — the whole
+  Playwright attempt runs under `tokio::time::timeout` (configured budget
+  + 15s grace; previously driver spawn, page.content(), browser.close()
+  and NetworkIdle were all unbounded), and headless-Chrome `--dump-dom`
+  has a 60s real-time watchdog that kills the child.
+- `browser`: the driver + Chromium are launched once and reused
+  process-wide (per-runtime cache — playwright-rs binds browsers to their
+  runtime); per scrape only a cheap fresh BrowserContext.
+- `browser`: concurrent first-scrapes await the single browser install
+  instead of erroring out (CAS-loser race).
+- `x`: thread recent-search fetch emits Fetch* events, checks status, and
+  rejects X error JSON instead of silently truncating threads; guest-token
+  and GraphQL requests emit the same Fetch* triple.
+- `main`: the CLI exits 1 on scrape failure (was exit 0); `--json` still
+  prints the Post (with the error field) before exiting non-zero.
+- `web`: walled pages that yielded junk text emit ContentExtractionFailed
+  instead of a misleading ContentExtracted.
+- `llm`: client-build failures (missing API key / unsupported
+  UNINEWS_LLM_CLIENT) emit LlmConversionFailed.
+
+  PERFORMANCE (hot paths):
+- `html`: the cleaner writes into a single output buffer (was O(size x
+  depth) string copies) and skips nested <article> subtrees.
+- `browser`: no more per-scrape driver+browser process spawns (see above).
+- `llm`: the conversion prompt is built with one pre-sized allocation
+  (removed a full-payload copy per scrape).
+- `x`: `x_text_urls` computed once per scrape (was up to 3x with an O(n^2)
+  dedup); `scrape_x_url` decomposed (373 -> 255 lines).
+- reqwest gains gzip + brotli (5-10x transfer savings per scrape) and
+  drops the unused `json` feature; tokio trimmed from `full` to
+  [macros, rt-multi-thread, sync, time].
+
+  TESTS: +40 hermetic tests across 5 new files (html, web_pipeline,
+  archive_eligibility, thin_content_trigger, util) — entity-injection and
+  50k-deep-DOM regressions, 16 MiB body cap, all three archive-eligibility
+  arms, every thin-trigger condition, token-leak and oversized-payload
+  regressions, char-boundary truncation; the live archive.org e2e is now
+  #[ignore]'d per the hermetic convention.
+
 0.45.0 JUL/25/2026
 - Playwright Chromium fallback for bot-protection walls (Cloudflare & co.)
   via `playwright-rs` 0.15, tried *before* archive.org so fresh articles
