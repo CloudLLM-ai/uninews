@@ -159,3 +159,54 @@ Once code is correct and tested:
 8. **Self-review** — before presenting code, verify: Are all types documented? Are there tests? Is mutation minimized? Are strings eliminated in favor of enums? Are errors properly typed? Are HTTP clients shared and time-bounded?
 
 **Update your agent memory** as you discover codebase patterns, module organization, existing types and enums, API conventions, database schema details, and performance-sensitive code paths. This builds up institutional knowledge across conversations. Write concise notes about what you found and where.
+
+## Hard-Earned Lessons (2026-07-25 deep-review cycle)
+
+Distilled from the 0.46.0 hardening release (5 Critical + 19 Important
+findings). These override generic best practices where they conflict.
+
+1. **Timeouts must cover EVERY wait — including library internals and
+   cleanup paths.** playwright-rs's `browser.close()` is an RPC with no
+   timeout; `wait_for_load_state` used a hardcoded 30s that silently
+   ignored our configured budget; Chrome's `--virtual-time-budget` fast-
+   forwards page timers but never bounds a trickling server. Wrap the
+   whole external operation in `tokio::time::timeout` (or a watchdog that
+   kills the child), not just the steps that accept a timeout parameter.
+2. **"Success" on empty input is data loss.** cloudllm trims history at
+   message granularity, so an oversized article was drained whole and
+   "converted" to invented content reported as success. Pre-flight any
+   invariant that a downstream trim/queue/buffer can silently violate —
+   fail loudly before the call.
+3. **Error strings that get persisted or displayed must never embed raw
+   response bodies.** The parse-failure path is exactly when the body
+   still carries a live secret (an `access_token` leaked into
+   `Post::error` this way). Summarize untrusted bodies with
+   char-boundary-safe truncation.
+4. **Fallback triggers must cover "200 but unusable", not just walls** —
+   extraction failures, implausibly thin content, JS shells. And a
+   fallback must never return something worse than the original result:
+   keep the plain result when the fallback can't improve it. That single
+   guarantee makes every trigger safe to fire.
+5. **Never hold a `std::Mutex` guard across `.await`** — rustc 1.96's
+   `clippy::await_holding_lock` errors under `-D warnings`. Tests that
+   mutate the same env vars run as sequential scenarios inside ONE
+   `#[tokio::test]` under one set of RAII guards.
+6. **Pin bogus provider credentials in "hermetic" tests.** Dev shells
+   export real API keys; an unguarded test will quietly make live calls
+   (one ran 300s). Set the client/provider env var to a junk value so the
+   network stage can never fire.
+7. **Hermetic tests alone miss real-world shape.** The 512-byte content
+   threshold in the thin-content trigger came from ONE live smoke run
+   (a 534 KB page yielding 138 chars of extraction), not from the
+   hermetic suite. Always run one live smoke before declaring trigger or
+   parse conditions correct.
+8. **HTTP 200 ≠ usable.** `dlnews.com/rss/` returns an HTML shell with a
+   200; check content type/body, not status. For JS-shell sites, verify
+   feed existence by rendering the page (Playwright) and inspecting the
+   live DOM for `link[rel="alternate"]` — "axios has no section feeds" is
+   proven this way, not assumed.
+9. **Process spawn on a hot path is a performance bug.** Per-request
+   node-driver + Chromium launches cost seconds. Cache heavyweight
+   externals process-wide — and when a library binds objects to their
+   tokio runtime (playwright-rs browsers panic cross-runtime), key the
+   cache per runtime.

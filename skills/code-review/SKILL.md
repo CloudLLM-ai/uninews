@@ -42,15 +42,33 @@ is a hypothesis, not a finding — verify it or drop it.
    caller-supplied URLs documented; spawned processes use
    `std::process::Command` arg arrays, never shell strings; listener
    callbacks panic-isolated (`catch_unwind`, no lock held across the call).
+   Proven hunt-list from the 0.46.0 audit:
+   - **Error paths that embed raw response bodies** (secret-leak class —
+     the parse-failure path is exactly when the body still carries a live
+     token).
+   - **"Success" paths that can succeed on empty/drained input**
+     (data-loss class — e.g. a trimmer draining the only message and the
+     caller reporting success). Pre-flight checks must exist.
+   - **Every wait bounded — including library-internal RPCs and cleanup
+     paths** (`close()` calls, driver handshakes, hardcoded library
+     defaults that ignore the configured budget).
+   - **Auto-download/auto-execute paths** (runtime binary installs):
+     disclosed, opt-out provided, time-bounded.
 4. **Performance (hot paths)** — per-scrape work: HTTP fetch, HTML
    cleaning, LLM conversion. Shared `reqwest::Client`s; selectors/regexes
    parsed once (`OnceLock`/const), not per call; zero-copy where cheap;
-   no intermediate `Vec` collect chains that can stay iterators.
+   no intermediate `Vec` collect chains that can stay iterators;
+   **no process spawns per request** (cache drivers/browsers — keyed
+   per-runtime when the library binds objects to their tokio runtime);
+   compression enabled on HTTP clients (gzip/brotli).
 5. **Reliability** — the fallback chain (plain HTTP → Playwright →
-   archive.org) triggers and orders correctly; every failure mode emits
-   the matching `ScrapeEvent`; env-var parsing degrades to defaults;
-   errors propagate as `Result` or documented error fields, never panics
-   across the public API.
+   archive.org) triggers and orders correctly, **and covers "200 but
+   unusable" pages (thin content / JS shells), not just walls**; a
+   fallback must never return something worse than the original result;
+   every failure mode emits the matching `ScrapeEvent`; env-var parsing
+   degrades to defaults; errors propagate as `Result` or documented error
+   fields, never panics across the public API; **no default-run test hits
+   the live network** (e2e tests that must, are `#[ignore]`'d).
 
 ## Method
 
@@ -66,6 +84,12 @@ is a hypothesis, not a finding — verify it or drop it.
 5. **Propose one concrete fix per finding** — the smallest change that
    resolves it, consistent with existing patterns. No speculative
    rewrites; no second mechanisms.
+6. **Validate conditions with a live smoke when the fix introduces
+   thresholds or triggers.** Hermetic fixtures encode the reviewer's
+   assumptions; the real world violates them (a "thin page" returning
+   534 KB with 138 chars of extraction was missed by strict
+   error/size-only conditions until one live run exposed it). One live
+   smoke before finalizing any trigger/threshold.
 
 ## Report format
 
