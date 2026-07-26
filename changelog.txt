@@ -1,3 +1,18 @@
+0.47.1 JUL/26/2026
+- Wall-order optimization for datacenter-IP hosts.
+
+  NEW:
+- `UNINEWS_CONTENT_FALLBACK_FIRST` (default off): when truthy AND a
+  content-fallback hook is installed, bot-protection walls consult the
+  hook BEFORE the local Playwright render. On hosts whose local render
+  can never pass the challenge (e.g. Cloudflare Turnstile on an AWS IP),
+  this saves the doomed ~60 s local attempt per walled URL. If the hook
+  then fails, the local render still runs as a last resort before
+  archive.org. Thin-content (JS-shell) ordering is unchanged — those
+  pages are not IP-gated, so local renders keep going first.
+- `content_fallback_first()` + `UNINEWS_CONTENT_FALLBACK_FIRST_ENV`
+  exported.
+
 0.47.0 JUL/26/2026
 - Host-provided content fallback hook, plus a public Playwright render API.
 

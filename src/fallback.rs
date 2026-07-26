@@ -56,6 +56,44 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, RwLock};
 
+use crate::browser::is_falsy_env_flag;
+
+/// Environment variable that puts the host content fallback **before** the
+/// built-in Playwright render for bot-protection walls.
+///
+/// Unset (the default), walls try the local Playwright render first and the
+/// hook second — the right order when the local IP has good reputation.
+/// Set to a truthy value (anything but `0`/`false`/`no`/`off`) when the
+/// host runs on a datacenter IP whose local render is doomed to fail the
+/// challenge anyway: the hook (e.g. a remote residential renderer) is
+/// consulted first, saving the wasted local render attempt (~60 s per
+/// walled URL).
+///
+/// Only wall ordering is affected: the thin-content trigger keeps its
+/// local-Playwright-first order, because JS-shell pages are not IP-gated
+/// and local renders succeed for them.
+///
+/// # Examples
+///
+/// ```
+/// use uninews::UNINEWS_CONTENT_FALLBACK_FIRST_ENV;
+/// assert_eq!(UNINEWS_CONTENT_FALLBACK_FIRST_ENV, "UNINEWS_CONTENT_FALLBACK_FIRST");
+/// ```
+pub const UNINEWS_CONTENT_FALLBACK_FIRST_ENV: &str = "UNINEWS_CONTENT_FALLBACK_FIRST";
+
+/// Whether the host content fallback should be consulted before the local
+/// Playwright render for bot-protection walls.
+///
+/// Enabled when [`UNINEWS_CONTENT_FALLBACK_FIRST_ENV`] is set to a
+/// non-falsy value; disabled when unset or falsy (see
+/// [`is_falsy_env_flag`]).
+pub fn content_fallback_first() -> bool {
+    match std::env::var(UNINEWS_CONTENT_FALLBACK_FIRST_ENV) {
+        Ok(value) => !is_falsy_env_flag(&value),
+        Err(_) => false,
+    }
+}
+
 /// Content supplied by the host for a URL uninews could not handle itself.
 ///
 /// Returned by the [`ContentFallbackHook`]; see the module-level docs for

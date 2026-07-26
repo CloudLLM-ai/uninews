@@ -34,7 +34,7 @@ use crate::browser::{
     fetch_rendered_dom_with_chrome, fetch_rendered_dom_with_playwright, playwright_enabled,
 };
 use crate::events::{emit_event, ScrapeEvent};
-use crate::fallback::{content_fallback_hook, ContentFallback};
+use crate::fallback::{content_fallback_first, content_fallback_hook, ContentFallback};
 use crate::html::parse_scraped_post_from_html;
 use crate::http::web_client;
 use crate::llm::convert_content_to_markdown;
@@ -531,6 +531,23 @@ async fn scrape_web_url_raw_with_title_override(url: &str, title_override: Optio
     // (fresher content, and the only fallback thin-content pages get).
     let mut post_after_playwright = raw.post;
     if raw.bot_protected || thin_content {
+        // Ordering for WALLS: when the operator knows the local render is
+        // doomed (datacenter IP the challenge will never pass), the host
+        // content fallback goes FIRST via UNINEWS_CONTENT_FALLBACK_FIRST,
+        // saving the wasted ~60 s local attempt. Thin-content pages keep
+        // local-Playwright-first ordering in every case — JS shells are
+        // not IP-gated, so local renders work for them.
+        let hook_first_for_wall = raw.bot_protected
+            && !thin_content
+            && content_fallback_first()
+            && content_fallback_hook().is_some();
+
+        if hook_first_for_wall {
+            if let Some(fallback_post) = try_host_content_fallback(url, title_override).await {
+                return fallback_post;
+            }
+        }
+
         if let Some(rendered) =
             try_playwright_fallback(url, title_override, &post_after_playwright.error).await
         {
@@ -550,9 +567,13 @@ async fn scrape_web_url_raw_with_title_override(url: &str, title_override: Optio
         // render, before archive.org. Covers walls the local render could
         // not pass and thin-content pages when local Playwright is
         // disabled or unavailable. On failure the chain below continues
-        // exactly as if the hook were absent.
-        if let Some(fallback_post) = try_host_content_fallback(url, title_override).await {
-            return fallback_post;
+        // exactly as if the hook were absent. (When hook_first_for_wall
+        // fired above and failed, this second consultation is skipped —
+        // the hook already had its chance.)
+        if !hook_first_for_wall {
+            if let Some(fallback_post) = try_host_content_fallback(url, title_override).await {
+                return fallback_post;
+            }
         }
     }
 

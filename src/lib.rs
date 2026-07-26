@@ -199,7 +199,8 @@ pub use browser::{
     playwright_overall_budget_ms, CHROME_DUMP_DOM_DEADLINE_MS, PLAYWRIGHT_OVERALL_GRACE_MS,
 };
 pub use fallback::{
-    set_content_fallback, ContentFallback, ContentFallbackFuture, ContentFallbackHook,
+    content_fallback_first, set_content_fallback, ContentFallback, ContentFallbackFuture,
+    ContentFallbackHook, UNINEWS_CONTENT_FALLBACK_FIRST_ENV,
 };
 #[doc(hidden)]
 pub use util::summarize_body;

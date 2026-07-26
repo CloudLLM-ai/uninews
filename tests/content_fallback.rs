@@ -11,7 +11,7 @@
 use std::env;
 use std::io::Write;
 use std::net::TcpListener;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use uninews::{
     is_youtube_url, set_content_fallback, universal_scrape, ContentFallback,
@@ -338,5 +338,138 @@ async fn healthy_page_does_not_consult_hook() {
     assert!(
         !consulted.load(std::sync::atomic::Ordering::SeqCst),
         "hook must not be consulted for a healthy page"
+    );
+}
+
+// ── UNINEWS_CONTENT_FALLBACK_FIRST ordering ───────────────────────────────────
+
+/// Collect the events a scrape emits (via the single-slot listener) so
+/// ordering assertions are deterministic. Restores the previous listener
+/// on drop.
+struct EventRecorder {
+    previous: Option<uninews::ScrapeEventListener>,
+    events: Arc<Mutex<Vec<String>>>,
+}
+
+impl EventRecorder {
+    fn start() -> Self {
+        let events: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = events.clone();
+        let previous = uninews::set_event_listener(Some(Arc::new(
+            move |event: &uninews::ScrapeEvent| {
+                let json = serde_json::to_value(event).expect("event serializes");
+                if let Some(name) = json["event"].as_str() {
+                    sink.lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .push(name.to_string());
+                }
+            },
+        )));
+        Self { previous, events }
+    }
+
+    fn names(&self) -> Vec<String> {
+        self.events
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+}
+
+impl Drop for EventRecorder {
+    fn drop(&mut self) {
+        uninews::set_event_listener(self.previous.take());
+    }
+}
+
+/// Flag SET + wall + hook installed: the hook is consulted BEFORE the
+/// local Playwright render (no PlaywrightFallbackStarted at all when the
+/// hook succeeds).
+#[tokio::test]
+async fn fallback_first_consults_hook_before_playwright_on_walls() {
+    let _lock = TEST_LOCK.lock().await;
+    let _flag = EnvVarGuard::set(uninews::UNINEWS_CONTENT_FALLBACK_FIRST_ENV, "1");
+    let _playwright = EnvVarGuard::set(UNINEWS_PLAYWRIGHT_ENV, "1");
+    let _archive = EnvVarGuard::set(UNINEWS_ARCHIVE_FALLBACK_ENV, "0");
+    let _llm = EnvVarGuard::set("UNINEWS_LLM_CLIENT", "definitely-not-a-provider");
+
+    let server = spawn_one_shot_server("403 Forbidden", CF_WALL_BODY);
+    let _hook = HookGuard::install(Arc::new(|_url| {
+        Box::pin(async move { Ok(ContentFallback::RenderedDom(article_body("HOOK-FIRST-MARKER"))) })
+    }));
+
+    let recorder = EventRecorder::start();
+    let post = universal_scrape(&server, "english", None).await;
+    let events = recorder.names();
+
+    assert!(
+        post.content.contains("HOOK-FIRST-MARKER"),
+        "hook content must win, content={:?}",
+        post.content
+    );
+    assert!(
+        events.contains(&"content_fallback_started".to_string()),
+        "hook must be consulted: {events:?}"
+    );
+    assert!(
+        !events.contains(&"playwright_fallback_started".to_string()),
+        "local Playwright must be skipped when the hook succeeds first: {events:?}"
+    );
+}
+
+/// Flag UNSET + wall + hook installed: the built-in order is preserved —
+/// Playwright first (and its failure), then the hook.
+#[tokio::test]
+async fn default_order_keeps_playwright_before_hook_on_walls() {
+    let _lock = TEST_LOCK.lock().await;
+    let _flag = EnvVarGuard::set(uninews::UNINEWS_CONTENT_FALLBACK_FIRST_ENV, "0");
+    let _playwright = EnvVarGuard::set(UNINEWS_PLAYWRIGHT_ENV, "1");
+    let _pw_timeout = EnvVarGuard::set(uninews::UNINEWS_PLAYWRIGHT_TIMEOUT_MS_ENV, "5000");
+    let _archive = EnvVarGuard::set(UNINEWS_ARCHIVE_FALLBACK_ENV, "0");
+    let _llm = EnvVarGuard::set("UNINEWS_LLM_CLIENT", "definitely-not-a-provider");
+
+    let server = spawn_one_shot_server("403 Forbidden", CF_WALL_BODY);
+    let _hook = HookGuard::install(Arc::new(|_url| {
+        Box::pin(async move { Ok(ContentFallback::RenderedDom(article_body("HOOK-SECOND-MARKER"))) })
+    }));
+
+    let recorder = EventRecorder::start();
+    let post = universal_scrape(&server, "english", None).await;
+    let events = recorder.names();
+
+    assert!(
+        post.content.contains("HOOK-SECOND-MARKER"),
+        "hook must rescue the scrape after local Playwright fails, content={:?}",
+        post.content
+    );
+    let pw = events.iter().position(|e| e == "playwright_fallback_started");
+    let hook = events.iter().position(|e| e == "content_fallback_started");
+    assert!(
+        pw.is_some() && hook.is_some() && pw < hook,
+        "default order must be Playwright-then-hook: {events:?}"
+    );
+}
+
+/// Flag SET but NO hook installed: pure no-op — the built-in chain runs
+/// untouched (wall → Playwright → failure, no fallback events).
+#[tokio::test]
+async fn fallback_first_without_hook_is_a_no_op() {
+    let _lock = TEST_LOCK.lock().await;
+    let _flag = EnvVarGuard::set(uninews::UNINEWS_CONTENT_FALLBACK_FIRST_ENV, "1");
+    let _playwright = EnvVarGuard::set(UNINEWS_PLAYWRIGHT_ENV, "0");
+    let _archive = EnvVarGuard::set(UNINEWS_ARCHIVE_FALLBACK_ENV, "0");
+    let _llm = EnvVarGuard::set("UNINEWS_LLM_CLIENT", "definitely-not-a-provider");
+    let _hook = set_content_fallback(None);
+
+    let server = spawn_one_shot_server("403 Forbidden", CF_WALL_BODY);
+
+    let recorder = EventRecorder::start();
+    let post = universal_scrape(&server, "english", None).await;
+    let events = recorder.names();
+
+    assert!(!post.error.is_empty(), "wall with no fallbacks must fail");
+    assert!(
+        !events.contains(&"content_fallback_started".to_string()),
+        "no hook → no fallback events: {events:?}"
     );
 }
