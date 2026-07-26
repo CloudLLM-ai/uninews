@@ -587,13 +587,18 @@ pub fn looks_like_browser_not_installed_message(message: &str) -> bool {
 /// Concurrent scrapes await the same in-flight install rather than failing
 /// with the original error. Requires Node.js on `PATH`.
 ///
+/// This is the same render the bot-protection fallback chain uses
+/// internally, exposed publicly so host applications can reuse it for
+/// their own rendering needs (e.g. serving a [`crate::ContentFallback`]
+/// hook) without duplicating the launch/wait/challenge-settle logic.
+///
 /// # Errors
 ///
 /// Returns a human-readable `String` when the Playwright server cannot
 /// start, Chromium cannot launch/install, navigation fails, the overall
 /// budget ([`playwright_overall_budget_ms`]) expires, or the DOM is empty.
 /// Callers treat any `Err` as "continue to archive.org".
-pub(crate) async fn fetch_rendered_dom_with_playwright(url: &str) -> Result<String, String> {
+pub async fn fetch_rendered_dom_with_playwright(url: &str) -> Result<String, String> {
     match fetch_rendered_dom_with_playwright_once(url).await {
         Ok(html) => Ok(html),
         Err(err) if looks_like_browser_not_installed_message(&err) => {

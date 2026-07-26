@@ -169,6 +169,7 @@
 pub mod archive;
 mod browser;
 pub mod events;
+mod fallback;
 #[doc(hidden)]
 pub mod html;
 mod http;
@@ -189,16 +190,20 @@ pub use browser::{
     is_falsy_env_flag, looks_like_browser_not_installed_message, parse_playwright_timeout_ms,
 };
 pub use browser::{
-    playwright_autoinstall_enabled, playwright_enabled, DEFAULT_PLAYWRIGHT_TIMEOUT_MS,
-    UNINEWS_PLAYWRIGHT_AUTOINSTALL_ENV, UNINEWS_PLAYWRIGHT_ENV,
+    fetch_rendered_dom_with_playwright, playwright_autoinstall_enabled, playwright_enabled,
+    DEFAULT_PLAYWRIGHT_TIMEOUT_MS, UNINEWS_PLAYWRIGHT_AUTOINSTALL_ENV, UNINEWS_PLAYWRIGHT_ENV,
     UNINEWS_PLAYWRIGHT_TIMEOUT_MS_ENV,
 };
 #[doc(hidden)]
 pub use browser::{
     playwright_overall_budget_ms, CHROME_DUMP_DOM_DEADLINE_MS, PLAYWRIGHT_OVERALL_GRACE_MS,
 };
+pub use fallback::{
+    set_content_fallback, ContentFallback, ContentFallbackFuture, ContentFallbackHook,
+};
 #[doc(hidden)]
 pub use util::summarize_body;
+pub use util::is_youtube_url;
 /// Re-exported event API. New [`ScrapeEvent`] variants are **additive** in
 /// minor releases — listeners must `match` with a wildcard arm to stay
 /// forward-compatible.

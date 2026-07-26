@@ -138,14 +138,39 @@ pub enum ScrapeEvent {
         /// Human-readable failure description.
         error: String,
     },
+    /// The host-provided content fallback hook (see
+    /// [`crate::set_content_fallback`]) is being consulted for `url` —
+    /// either because the URL's real payload never appears in the page
+    /// HTML (video transcripts) or because the built-in fallbacks could
+    /// not produce usable content.
+    ContentFallbackStarted {
+        /// The URL handed to the hook.
+        url: String,
+    },
+    /// The host content fallback produced usable content (extracted text,
+    /// or a rendered DOM that passed wall re-validation and extraction).
+    ContentFallbackSucceeded {
+        /// The URL the hook handled.
+        url: String,
+        /// Size of the produced content or DOM in bytes.
+        content_bytes: usize,
+    },
+    /// The host content fallback failed or produced unusable content
+    /// (hook error, empty content, still-walled DOM, extraction failure).
+    /// The pipeline continues to the next fallback unchanged.
+    ContentFallbackFailed {
+        /// The URL that was attempted.
+        url: String,
+        /// Human-readable failure description.
+        error: String,
+    },
     /// The archive.org Wayback Machine fallback has been engaged.
     ArchiveFallbackStarted {
         /// The original URL that could not be scraped directly.
         url: String,
         /// Why the fallback was engaged.
         reason: String,
-    },
-    /// archive.org has a usable snapshot of the URL.
+    },    /// archive.org has a usable snapshot of the URL.
     ArchiveSnapshotFound {
         /// The original URL.
         url: String,

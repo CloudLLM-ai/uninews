@@ -34,9 +34,11 @@ use crate::browser::{
     fetch_rendered_dom_with_chrome, fetch_rendered_dom_with_playwright, playwright_enabled,
 };
 use crate::events::{emit_event, ScrapeEvent};
+use crate::fallback::{content_fallback_hook, ContentFallback};
 use crate::html::parse_scraped_post_from_html;
 use crate::http::web_client;
 use crate::llm::convert_content_to_markdown;
+use crate::util::is_youtube_url;
 use crate::x::{
     is_x_article_url, is_x_url, x_article_body_unavailable, x_debug_dump,
     x_debug_dump_http_response,
@@ -393,6 +395,90 @@ async fn try_playwright_fallback(
     None
 }
 
+/// Consult the host-provided content fallback hook for `url`.
+///
+/// Returns `Some(post)` only when the hook produced usable content:
+/// [`ContentFallback::Extracted`] with non-empty content (used as-is), or
+/// [`ContentFallback::RenderedDom`] that survives bot-wall re-validation
+/// *and* yields extractable article content. Returns `None` when no hook
+/// is installed or the hook's output was unusable — callers continue
+/// their normal fallback chain, so the hook can never make a scrape
+/// worse.
+async fn try_host_content_fallback(url: &str, title_override: Option<&str>) -> Option<Post> {
+    let hook = content_fallback_hook()?;
+
+    emit_event(ScrapeEvent::ContentFallbackStarted {
+        url: url.to_string(),
+    });
+
+    match hook(url.to_string()).await {
+        Ok(ContentFallback::Extracted { title, content }) => {
+            if content.trim().is_empty() {
+                emit_event(ScrapeEvent::ContentFallbackFailed {
+                    url: url.to_string(),
+                    error: "host fallback returned empty content".to_string(),
+                });
+                return None;
+            }
+            emit_event(ScrapeEvent::ContentFallbackSucceeded {
+                url: url.to_string(),
+                content_bytes: content.len(),
+            });
+            emit_event(ScrapeEvent::ContentExtracted {
+                url: url.to_string(),
+                content_bytes: content.len(),
+            });
+            Some(Post {
+                title: title.unwrap_or_default(),
+                content,
+                featured_image_url: String::new(),
+                publication_date: None,
+                author: None,
+                error: String::new(),
+            })
+        }
+        Ok(ContentFallback::RenderedDom(html)) => {
+            // A walled DOM from the host is not a success — re-validate
+            // exactly like the built-in Playwright render path does.
+            if looks_like_bot_protection(200, &HeaderMap::new(), &html) {
+                emit_event(ScrapeEvent::ContentFallbackFailed {
+                    url: url.to_string(),
+                    error: "host-rendered DOM still looks like a bot-protection wall"
+                        .to_string(),
+                });
+                return None;
+            }
+            let rendered = parse_scraped_post_from_html(url, &html, title_override);
+            if rendered.error.is_empty() {
+                emit_event(ScrapeEvent::ContentFallbackSucceeded {
+                    url: url.to_string(),
+                    content_bytes: html.len(),
+                });
+                emit_event(ScrapeEvent::ContentExtracted {
+                    url: url.to_string(),
+                    content_bytes: rendered.content.len(),
+                });
+                return Some(rendered);
+            }
+            emit_event(ScrapeEvent::ContentFallbackFailed {
+                url: url.to_string(),
+                error: format!(
+                    "host-rendered DOM extracted no usable content: {}",
+                    rendered.error
+                ),
+            });
+            None
+        }
+        Err(err) => {
+            emit_event(ScrapeEvent::ContentFallbackFailed {
+                url: url.to_string(),
+                error: err,
+            });
+            None
+        }
+    }
+}
+
 /// Fetch `url` and parse the HTML body into a [`Post`], without any LLM
 /// conversion.
 ///
@@ -407,6 +493,17 @@ async fn try_playwright_fallback(
 /// disabled via `UNINEWS_ARCHIVE_FALLBACK=0`); thin-content pages are not
 /// archive-eligible, so Playwright is their only fallback.
 async fn scrape_web_url_raw_with_title_override(url: &str, title_override: Option<&str>) -> Post {
+    // URLs whose real payload never appears in the page HTML (YouTube
+    // videos: the article-equivalent content is the transcript) go
+    // straight to the host content fallback when one is installed. When
+    // no hook is installed — or it cannot serve the URL — the normal
+    // fetch pipeline below runs unchanged.
+    if is_youtube_url(url) {
+        if let Some(post) = try_host_content_fallback(url, title_override).await {
+            return post;
+        }
+    }
+
     let raw = fetch_and_parse(url, title_override).await;
 
     // Thin-content trigger: a healthy, non-walled page whose extraction
@@ -447,6 +544,15 @@ async fn scrape_web_url_raw_with_title_override(url: &str, title_override: Optio
                 "{} (Playwright Chromium fallback did not yield usable content)",
                 post_after_playwright.error
             );
+        }
+
+        // Host content fallback (when installed): after the built-in
+        // render, before archive.org. Covers walls the local render could
+        // not pass and thin-content pages when local Playwright is
+        // disabled or unavailable. On failure the chain below continues
+        // exactly as if the hook were absent.
+        if let Some(fallback_post) = try_host_content_fallback(url, title_override).await {
+            return fallback_post;
         }
     }
 
