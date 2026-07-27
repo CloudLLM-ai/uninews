@@ -210,3 +210,38 @@ findings). These override generic best practices where they conflict.
    externals process-wide — and when a library binds objects to their
    tokio runtime (playwright-rs browsers panic cross-runtime), key the
    cache per runtime.
+
+## Hard-Earned Lessons III (content-fallback hook + wall-order flag, 2026-07-26)
+
+From shipping 0.47.0/0.47.1 (host content-fallback hook, public render API,
+`UNINEWS_CONTENT_FALLBACK_FIRST`).
+
+1. **Extension points for a public crate: a single-slot process-global hook
+   mirrors the event-listener design.** `set_content_fallback` lets the host
+   inject capability (remote rendering, transcript extraction) while the
+   crate stays ignorant of host internals. Consult it at exactly the points
+   the built-in chain provably cannot win (pre-fetch for content that never
+   appears in HTML; post-render for walls), and make hook-absent behavior
+   byte-identical to before.
+2. **Host-provided data is untrusted — re-validate it.** The hook's
+   `RenderedDom` goes through the same `looks_like_bot_protection` check as
+   the local render; a remote renderer CAN return a challenge page. Never
+   let an injection point bypass the validation the built-in path gets.
+3. **Operator preferences belong in env flags with the crate's falsy-token
+   convention, default = prior behavior.** `UNINEWS_CONTENT_FALLBACK_FIRST`
+   reorders wall fallbacks only when explicitly enabled; unset means 0.47.0
+   behavior. Pure parsers (`parse_playwright_timeout_ms`-style) make the
+   flag contract testable without a scrape.
+4. **Process-global hook slots make parallel tests race — serialize with a
+   file-local `tokio::sync::Mutex`** (await-safe; std `Mutex` across
+   `.await` trips `clippy::await_holding_lock` under `-D warnings`), and
+   pin ORDER with a recording event listener (deterministic) instead of
+   wall-clock timing (flaky). Each integration-test file is its own
+   process, so the mutex only needs to cover the one file that installs
+   hooks.
+5. **Test fixtures must be shaped like the real thing, or they trip
+   unrelated triggers.** A 2 KB "article" fixture hit the 16 KiB JS-shell
+   thin-content trigger and made a healthy-page test consult the hook.
+   Fixture size/shape is part of the test's contract with the pipeline —
+   when a test fails in an "impossible" way, check which trigger the
+   fixture accidentally satisfies.

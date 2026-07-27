@@ -127,3 +127,19 @@ When the author disagrees with a finding:
 - Never soften a Critical to keep the peace — mislabeling severity is
   how silent-drop bugs ship (see: Telegram `callback_data` 64-byte
   rejections swallowed as `None`, diariobitcoin 2026-07-25).
+
+## Field lessons (2026-07-26)
+
+- **New env flags / public API knobs: the default must be the old
+  behavior, and the review should see the test that proves it** (flag set
+  vs unset event-order tests). An additive knob that silently changes
+  default behavior is a breaking change wearing a minor-version bump.
+- **Extension hooks widen the trust boundary — check what validation the
+  injected data skips.** A host-supplied rendered DOM must pass the same
+  bot-wall re-validation as the locally rendered one; if the review finds
+  a hook path that skips validation the built-in path gets, that's a
+  Critical, not a nit.
+- **Fixture shape is review surface.** A test fixture that accidentally
+  satisfies an unrelated pipeline trigger (too-small "article" trips the
+  JS-shell threshold) produces tests that pass for the wrong reason —
+  check fixture sizes/shapes against the pipeline's thresholds.
