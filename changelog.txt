@@ -14,6 +14,46 @@
   shells (e.g. Cointelegraph's Nuxt shell) correctly trigger the Playwright /
   relay retry instead of returning a fake teaser.
 
+0.47.1 JUL/26/2026
+- Wall-order optimization for datacenter-IP hosts.
+
+  NEW:
+- `UNINEWS_CONTENT_FALLBACK_FIRST` (default off): when truthy AND a
+  content-fallback hook is installed, bot-protection walls consult the
+  hook BEFORE the local Playwright render. On hosts whose local render
+  can never pass the challenge (e.g. Cloudflare Turnstile on an AWS IP),
+  this saves the doomed ~60 s local attempt per walled URL. If the hook
+  then fails, the local render still runs as a last resort before
+  archive.org. Thin-content (JS-shell) ordering is unchanged — those
+  pages are not IP-gated, so local renders keep going first.
+- `content_fallback_first()` + `UNINEWS_CONTENT_FALLBACK_FIRST_ENV`
+  exported.
+
+0.47.0 JUL/26/2026
+- Host-provided content fallback hook, plus a public Playwright render API.
+
+  NEW:
+- `set_content_fallback(hook)`: a single process-wide hook (same design as
+  the event listener) the host application installs to supply content for
+  URLs uninews cannot handle itself. Consulted at two points:
+  (a) YouTube URLs — BEFORE any fetch, since a video's article-equivalent
+      payload (the transcript) never appears in the watch-page HTML;
+  (b) bot-protection walls and thin-content pages — AFTER the built-in
+      Playwright render (when disabled or unsuccessful), BEFORE
+      archive.org. `ContentFallback::RenderedDom` output is re-validated
+      against the bot-wall heuristics before extraction; `Extracted`
+      content flows through the normal LLM Markdown step. Hook absent →
+      behavior identical to 0.46.0; hook failure → chain continues
+      unchanged (the hook can never make a scrape worse).
+- `ContentFallback::{RenderedDom, Extracted{title, content}}`,
+  `ContentFallbackHook`, `ContentFallbackFuture` types.
+- `fetch_rendered_dom_with_playwright(url)` is now public: hosts can
+  reuse the built-in launch/wait/challenge-settle render logic (e.g. to
+  back a content-fallback hook) instead of duplicating it.
+- `is_youtube_url(url)` is now public.
+- `ScrapeEvent::ContentFallbackStarted/Succeeded/Failed` (additive;
+  listeners with a wildcard arm are unaffected).
+
 0.46.0 JUL/25/2026
 - Deep-review hardening release (5 Critical + 19 Important findings from a
   full-crate audit — idioms, docs, security, hot-path performance,

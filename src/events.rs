@@ -170,8 +170,7 @@ pub enum ScrapeEvent {
         url: String,
         /// Why the fallback was engaged.
         reason: String,
-    },
-    /// archive.org has a usable snapshot of the URL.
+    },    /// archive.org has a usable snapshot of the URL.
     ArchiveSnapshotFound {
         /// The original URL.
         url: String,
