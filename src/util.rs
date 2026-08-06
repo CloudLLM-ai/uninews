@@ -40,3 +40,38 @@ pub fn summarize_body(body: &str, max_len: usize) -> String {
     }
     format!("{}...", &trimmed[..end])
 }
+
+/// Returns `true` when `url` points at YouTube — any `youtube.com` (or
+/// subdomain) path, or a `youtu.be` short link.
+///
+/// Used by the web pipeline to give the host content-fallback hook first
+/// crack at video URLs (the article-equivalent payload of a video — its
+/// transcript — never appears in the watch-page HTML). The check is
+/// host-based, not substring-based, so `https://notyoutube.com/x` does
+/// NOT match. Deliberately shape-based rather than video-ID-precise:
+/// channels and playlists match too, and the hook decides what it can
+/// serve.
+///
+/// # Examples
+///
+/// ```
+/// use uninews::is_youtube_url;
+/// assert!(is_youtube_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ"));
+/// assert!(is_youtube_url("https://youtu.be/dQw4w9WgXcQ"));
+/// assert!(!is_youtube_url("https://notyoutube.com/watch?v=x"));
+/// ```
+pub fn is_youtube_url(url: &str) -> bool {
+    let without_scheme = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .unwrap_or(url);
+    let host = without_scheme
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    host == "youtube.com"
+        || host.ends_with(".youtube.com")
+        || host == "youtu.be"
+        || host.ends_with(".youtu.be")
+}

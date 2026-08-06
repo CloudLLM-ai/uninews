@@ -196,9 +196,11 @@ fn clean_element(element: ElementRef, skip_tags: &[&str]) -> String {
 /// separate pass would duplicate work and produce a shorter, redundant
 /// candidate for the longest-article selection.
 fn has_article_ancestor(element: ElementRef) -> bool {
-    element
-        .ancestors()
-        .any(|node| node.value().as_element().is_some_and(|e| e.name() == "article"))
+    element.ancestors().any(|node| {
+        node.value()
+            .as_element()
+            .is_some_and(|e| e.name() == "article")
+    })
 }
 
 /// Extracts and cleans main content from an HTML document.
@@ -355,6 +357,20 @@ pub fn parse_scraped_post_from_html(
         };
     }
 
+    if let Some(marker) = looks_like_blocked_content(&content) {
+        return Post {
+            title,
+            content: String::new(),
+            featured_image_url,
+            publication_date,
+            author,
+            error: format!(
+                "BlockedContent: the page appears to require a subscription, paywall, or bot check (matched \"{}\"). The extracted content is likely not the real article body.",
+                marker
+            ),
+        };
+    }
+
     Post {
         title,
         content,
@@ -363,4 +379,90 @@ pub fn parse_scraped_post_from_html(
         author,
         error: String::new(),
     }
+}
+
+/// Phrases that strongly indicate a soft-block / paywall / interstitial
+/// rather than real article body. Matched case-insensitively against the
+/// CLEANED HTML string. Deliberately multi-word where possible to avoid
+/// false positives on articles that merely *mention* subscriptions.
+const BLOCKED_CONTENT_MARKERS: &[&str] = &[
+    "subscribe to unlock",
+    "subscribe to continue",
+    "to continue reading",
+    "please subscribe",
+    "you have reached your limit",
+    "premium content",
+    "members only",
+    "sign in to read",
+    "please sign in",
+    "access denied",
+    "please enable javascript",
+    "enable javascript and cookies to continue",
+    "checking your browser",
+    "verify you are human",
+    "attention required",
+    "turn off your ad blocker",
+    "disable your ad blocker",
+    "this content is not available",
+    "content is unavailable",
+    "paywall",
+];
+
+/// Return the first blocked marker found in `cleaned_html` (case-insensitive),
+/// or `None` when the content looks like a real article.
+#[doc(hidden)]
+pub fn looks_like_blocked_content(cleaned_html: &str) -> Option<&'static str> {
+    let haystack = cleaned_html.to_ascii_lowercase();
+    for marker in BLOCKED_CONTENT_MARKERS {
+        if haystack.contains(marker) {
+            return Some(*marker);
+        }
+    }
+    None
+}
+
+/// Minimum visible-text thresholds for the *advisory* insufficient-content
+/// helper. Not enforced as a hard error in `parse_scraped_post_from_html`
+/// — short synthetic fixtures in unit tests are legitimate — but exposed
+/// so `web.rs` thin-content logic and downstream consumers (e.g. canuto's
+/// hallucination guard) can share one definition. 300 chars / 40 words:
+/// a teaser-only Cointelegraph Nuxt shell is ~59 chars and correctly
+/// flags as insufficient at the helper level.
+const MIN_VISIBLE_CHARS: usize = 300;
+const MIN_VISIBLE_WORDS: usize = 40;
+
+/// Visible text extracted from `cleaned_html` (tags stripped).
+#[doc(hidden)]
+pub fn visible_text_from_cleaned_html(cleaned_html: &str) -> String {
+    let mut out = String::with_capacity(cleaned_html.len());
+    let mut in_tag = false;
+    for ch in cleaned_html.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(ch),
+            _ => {}
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// True when `cleaned_html` yields too little visible text to be a real article.
+#[doc(hidden)]
+pub fn is_content_insufficient(cleaned_html: &str) -> bool {
+    insufficient_content_reason(cleaned_html).is_some()
+}
+
+#[doc(hidden)]
+pub fn insufficient_content_reason(cleaned_html: &str) -> Option<String> {
+    let visible = visible_text_from_cleaned_html(cleaned_html);
+    let chars = visible.chars().count();
+    let words = visible.split_whitespace().count();
+    if chars < MIN_VISIBLE_CHARS || words < MIN_VISIBLE_WORDS {
+        return Some(format!(
+            "extracted text is too short ({} chars, {} words; minimum {} chars and {} words) — likely a blocked or empty page",
+            chars, words, MIN_VISIBLE_CHARS, MIN_VISIBLE_WORDS
+        ));
+    }
+    None
 }

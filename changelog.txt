@@ -1,3 +1,19 @@
+0.47.2 AUG/06/2026
+- Blocked-content detection: `html::parse_scraped_post_from_html` now rejects
+  soft-block shells that returned 200 but whose cleaned body says
+  "subscribe to unlock", "please sign in", "access denied", etc.
+  (`html::BLOCKED_CONTENT_MARKERS` / `looks_like_blocked_content: BlockedContent:`)
+  before returning a fake article. The error is typed (`BlockedContent:`) so
+  callers can classify paywall / soft-block failures vs transit errors.
+  Also exposes advisory helpers `visible_text_from_cleaned_html` /
+  `is_content_insufficient` / `insufficient_content_reason` (300 chars /
+  40 words) for thin-content / post-conversion checks.
+- Thin-content hardening: `web::scrape_web_url_raw_with_title_override`
+  consults `is_content_insufficient` (thin `Post::content`) alongside the
+  existing `MIN_CONTENT_BYTES` / `JS_SHELL_MAX_BYTES` heuristics, so teaser
+  shells (e.g. Cointelegraph's Nuxt shell) correctly trigger the Playwright /
+  relay retry instead of returning a fake teaser.
+
 0.46.0 JUL/25/2026
 - Deep-review hardening release (5 Critical + 19 Important findings from a
   full-crate audit — idioms, docs, security, hot-path performance,

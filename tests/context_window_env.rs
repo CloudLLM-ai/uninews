@@ -141,7 +141,10 @@ fn resolve_llm_context_window_uses_default_when_none_and_env_unset() {
 fn resolve_llm_context_window_rejects_explicit_zero() {
     let _env_lock = ENV_LOCK.lock().unwrap();
     let _guard = EnvVarGuard::unset(UNINEWS_LLM_CONTEXT_WINDOW_ENV);
-    assert_eq!(resolve_llm_context_window(Some(0)), DEFAULT_LLM_CONTEXT_WINDOW);
+    assert_eq!(
+        resolve_llm_context_window(Some(0)),
+        DEFAULT_LLM_CONTEXT_WINDOW
+    );
 }
 
 /// The unknown-`UNINEWS_LLM_CLIENT` error path must name the offending value,

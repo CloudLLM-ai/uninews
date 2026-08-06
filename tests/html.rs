@@ -114,8 +114,9 @@ fn empty_subtrees_are_elided() {
 /// semantics: skipped subtrees are not traversed at all.
 #[test]
 fn script_element_is_dropped_but_surrounding_text_survives() {
-    let post =
-        parse("<html><body><article>Before <script>alert(1)</script> After</article></body></html>");
+    let post = parse(
+        "<html><body><article>Before <script>alert(1)</script> After</article></body></html>",
+    );
 
     assert!(post.error.is_empty());
     assert_eq!(post.content, "<article>Before After</article>");

@@ -718,8 +718,8 @@ async fn resolve_x_bearer_token(client: &Client) -> Result<String, String> {
 
     // Never include the body in this error: on a parse failure the body may
     // still carry a valid `access_token` (e.g. X renamed another field).
-    let token_data: XBearerTokenResponse = serde_json::from_str(&body)
-        .map_err(|e| x_bearer_token_parse_error(&e))?;
+    let token_data: XBearerTokenResponse =
+        serde_json::from_str(&body).map_err(|e| x_bearer_token_parse_error(&e))?;
 
     if !token_data.token_type.eq_ignore_ascii_case("bearer") {
         return Err(format!(

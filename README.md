@@ -36,7 +36,9 @@ Options:
 ## Features
 
 - **Scraping & Cleaning:** Extracts the main content of a news article by targeting the `<article>` tag (or falling back to `<body>`) and removing unwanted elements.
+  Detected paywall / soft-block shells (200s that say "subscribe to unlock", "please sign in", …) are rejected as `BlockedContent:` with a classified `Post::error` before any hallucinated draft is produced.
 - **Markdown Conversion:** Uses the [CloudLLM](https://github.com/CloudLLM-ai/cloudllm/tree/main) Rust API to convert the cleaned HTML content into near-lossless Markdown. The LLM provider is pluggable via env vars (see [LLM Providers](#llm-providers)).
+  Post-conversion hallucination guards (`no pude leer` / `could not extract` fillers, <300 chars / <40 words visible) are applied downstream in `dbtc_draft` — the HTML layer only blocks the explicit paywall markers.
 - **X.com / Twitter Support:** Reads individual tweets and full X threads via the X API v2, assembling the thread chronologically before converting it to Markdown.
 - **Playwright Fallback:** Bot-protection walls (Cloudflare challenges and similar) and thin-content pages (a healthy 200 response whose extraction fails, or whose raw HTML is under 16 KiB — JS application shells) are first retried by rendering the page in headless Chromium via [`playwright-rs`](https://crates.io/crates/playwright-rs). Requires Node.js on `PATH` and a one-time Chromium install (see [Playwright Fallback](#playwright-fallback)). Enabled by default; set `UNINEWS_PLAYWRIGHT=0` to disable.
 - **archive.org Fallback:** Pages still blocked after Playwright (or when Playwright is disabled), and pages failing outright (network errors, 5xx), are retried via the latest Wayback Machine snapshot. Enabled by default; set `UNINEWS_ARCHIVE_FALLBACK=0` to disable. See [archive.org Fallback](#archiveorg-fallback).

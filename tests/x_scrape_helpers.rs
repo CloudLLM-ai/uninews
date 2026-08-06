@@ -10,9 +10,9 @@
 use serde_json::json;
 use uninews::html::parse_scraped_post_from_html;
 use uninews::x::{
-    extract_tweet_id, is_x_article_url, is_x_url, parse_x_search_tweets,
-    parse_x_web_article_post, x_article_body_unavailable, x_article_plain_text,
-    x_linked_article_url, x_post_is_link_only, XArticleMeta, XTweet,
+    extract_tweet_id, is_x_article_url, is_x_url, parse_x_search_tweets, parse_x_web_article_post,
+    x_article_body_unavailable, x_article_plain_text, x_linked_article_url, x_post_is_link_only,
+    XArticleMeta, XTweet,
 };
 
 /// Build an `XTweet` carrying a single URL entity, mirroring the relevant

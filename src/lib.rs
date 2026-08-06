@@ -169,6 +169,7 @@
 pub mod archive;
 mod browser;
 pub mod events;
+mod fallback;
 #[doc(hidden)]
 pub mod html;
 mod http;
@@ -184,30 +185,35 @@ pub use archive::{archive_fallback_enabled, ArchiveSnapshot, UNINEWS_ARCHIVE_FAL
 // Re-export Playwright toggles from the private `browser` module so operators
 // and tests can configure the bot-protection browser path without reaching
 // into crate-private modules.
+pub use browser::{
+    fetch_rendered_dom_with_playwright, playwright_autoinstall_enabled, playwright_enabled,
+    DEFAULT_PLAYWRIGHT_TIMEOUT_MS, UNINEWS_PLAYWRIGHT_AUTOINSTALL_ENV, UNINEWS_PLAYWRIGHT_ENV,
+    UNINEWS_PLAYWRIGHT_TIMEOUT_MS_ENV,
+};
 #[doc(hidden)]
 pub use browser::{
     is_falsy_env_flag, looks_like_browser_not_installed_message, parse_playwright_timeout_ms,
-};
-pub use browser::{
-    playwright_autoinstall_enabled, playwright_enabled, DEFAULT_PLAYWRIGHT_TIMEOUT_MS,
-    UNINEWS_PLAYWRIGHT_AUTOINSTALL_ENV, UNINEWS_PLAYWRIGHT_ENV,
-    UNINEWS_PLAYWRIGHT_TIMEOUT_MS_ENV,
 };
 #[doc(hidden)]
 pub use browser::{
     playwright_overall_budget_ms, CHROME_DUMP_DOM_DEADLINE_MS, PLAYWRIGHT_OVERALL_GRACE_MS,
 };
-#[doc(hidden)]
-pub use util::summarize_body;
 /// Re-exported event API. New [`ScrapeEvent`] variants are **additive** in
 /// minor releases — listeners must `match` with a wildcard arm to stay
 /// forward-compatible.
 pub use events::{set_event_listener, ScrapeEvent, ScrapeEventListener};
+pub use fallback::{
+    content_fallback_first, set_content_fallback, ContentFallback, ContentFallbackFuture,
+    ContentFallbackHook, UNINEWS_CONTENT_FALLBACK_FIRST_ENV,
+};
 pub use llm::{
     active_llm_client, active_provider_label, convert_content_to_markdown, llm_context_window,
     resolve_llm_context_window, uninews_llm_context_window, LLMClientInfo,
     DEFAULT_LLM_CONTEXT_WINDOW, UNINEWS_LLM_CONTEXT_WINDOW_ENV,
 };
+pub use util::is_youtube_url;
+#[doc(hidden)]
+pub use util::summarize_body;
 
 /// Represents a scraped news post with all extracted metadata.
 ///
