@@ -114,7 +114,9 @@ fn article_body(marker: &str) -> String {
 
 #[test]
 fn youtube_url_shapes() {
-    assert!(is_youtube_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ"));
+    assert!(is_youtube_url(
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    ));
     assert!(is_youtube_url("https://youtube.com/watch?v=dQw4w9WgXcQ"));
     assert!(is_youtube_url("https://youtu.be/dQw4w9WgXcQ"));
     assert!(is_youtube_url("https://www.youtube.com/@channel/videos"));
@@ -127,12 +129,10 @@ fn youtube_url_shapes() {
 #[tokio::test]
 async fn set_content_fallback_returns_previous() {
     let _lock = TEST_LOCK.lock().await;
-    let hook_a: uninews::ContentFallbackHook = Arc::new(|url| {
-        Box::pin(async move { Err(format!("no fallback for {url}")) })
-    });
-    let hook_b: uninews::ContentFallbackHook = Arc::new(|url| {
-        Box::pin(async move { Err(format!("no fallback for {url}")) })
-    });
+    let hook_a: uninews::ContentFallbackHook =
+        Arc::new(|url| Box::pin(async move { Err(format!("no fallback for {url}")) }));
+    let hook_b: uninews::ContentFallbackHook =
+        Arc::new(|url| Box::pin(async move { Err(format!("no fallback for {url}")) }));
 
     let prev = set_content_fallback(Some(hook_a));
     assert!(prev.is_none(), "fresh process should have no hook");
@@ -238,7 +238,11 @@ async fn walled_page_uses_hook_rendered_dom() {
     let server = spawn_one_shot_server("403 Forbidden", CF_WALL_BODY);
 
     let _hook = HookGuard::install(Arc::new(|_url| {
-        Box::pin(async move { Ok(ContentFallback::RenderedDom(article_body("HOOK-RENDERED-MARKER"))) })
+        Box::pin(async move {
+            Ok(ContentFallback::RenderedDom(article_body(
+                "HOOK-RENDERED-MARKER",
+            )))
+        })
     }));
 
     let post = universal_scrape(&server, "english", None).await;
@@ -295,7 +299,10 @@ async fn walled_page_without_hook_behaves_like_baseline() {
 
     let post = universal_scrape(&server, "english", None).await;
 
-    assert!(!post.error.is_empty(), "wall without any fallback must fail");
+    assert!(
+        !post.error.is_empty(),
+        "wall without any fallback must fail"
+    );
     assert!(
         post.error.contains("bot-protection") || post.error.contains("Could not extract"),
         "error should be the built-in wall/extraction chain, got: {}",
@@ -355,16 +362,15 @@ impl EventRecorder {
     fn start() -> Self {
         let events: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
         let sink = events.clone();
-        let previous = uninews::set_event_listener(Some(Arc::new(
-            move |event: &uninews::ScrapeEvent| {
+        let previous =
+            uninews::set_event_listener(Some(Arc::new(move |event: &uninews::ScrapeEvent| {
                 let json = serde_json::to_value(event).expect("event serializes");
                 if let Some(name) = json["event"].as_str() {
                     sink.lock()
                         .unwrap_or_else(|e| e.into_inner())
                         .push(name.to_string());
                 }
-            },
-        )));
+            })));
         Self { previous, events }
     }
 
@@ -395,7 +401,11 @@ async fn fallback_first_consults_hook_before_playwright_on_walls() {
 
     let server = spawn_one_shot_server("403 Forbidden", CF_WALL_BODY);
     let _hook = HookGuard::install(Arc::new(|_url| {
-        Box::pin(async move { Ok(ContentFallback::RenderedDom(article_body("HOOK-FIRST-MARKER"))) })
+        Box::pin(async move {
+            Ok(ContentFallback::RenderedDom(article_body(
+                "HOOK-FIRST-MARKER",
+            )))
+        })
     }));
 
     let recorder = EventRecorder::start();
@@ -430,7 +440,11 @@ async fn default_order_keeps_playwright_before_hook_on_walls() {
 
     let server = spawn_one_shot_server("403 Forbidden", CF_WALL_BODY);
     let _hook = HookGuard::install(Arc::new(|_url| {
-        Box::pin(async move { Ok(ContentFallback::RenderedDom(article_body("HOOK-SECOND-MARKER"))) })
+        Box::pin(async move {
+            Ok(ContentFallback::RenderedDom(article_body(
+                "HOOK-SECOND-MARKER",
+            )))
+        })
     }));
 
     let recorder = EventRecorder::start();
@@ -442,7 +456,9 @@ async fn default_order_keeps_playwright_before_hook_on_walls() {
         "hook must rescue the scrape after local Playwright fails, content={:?}",
         post.content
     );
-    let pw = events.iter().position(|e| e == "playwright_fallback_started");
+    let pw = events
+        .iter()
+        .position(|e| e == "playwright_fallback_started");
     let hook = events.iter().position(|e| e == "content_fallback_started");
     assert!(
         pw.is_some() && hook.is_some() && pw < hook,
