@@ -1,3 +1,20 @@
+0.48.0 AUG/07/2026
+- Hard-failure fallback ordering fix: a plain-web fetch that TIMED OUT or
+  returned a 5xx (a `network_failure` / `server_error`) previously skipped
+  Playwright and the host content fallback entirely and went straight to
+  the archive.org Wayback fallback — archive.org itself is rate-limitable
+  (HTTP 429), so the whole read could fail with a real browser/broker never
+  even tried. On a datacenter IP a timeout / 5xx is usually Cloudflare &
+  co. silently dropping the request *before* a bot-protection marker is
+  visible, so the same render + host-fallback chain that clears walls now
+  runs for hard failures too:
+  `web::scrape_web_url_raw_with_title_override` attempts Playwright and the
+  host content fallback when `bot_protected || thin_content ||
+  network_failure || server_error`. `UNINEWS_CONTENT_FALLBACK_FIRST` (the
+  wall-order flag dbtc sets on cloud hosts) now also puts the host broker
+  first for hard failures, since local Playwright is doomed on the
+  datacenter IP. archive.org remains the LAST fallback only.
+
 0.47.2 AUG/06/2026
 - Blocked-content detection: `html::parse_scraped_post_from_html` now rejects
   soft-block shells that returned 200 but whose cleaned body says

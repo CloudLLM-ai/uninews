@@ -81,16 +81,21 @@
 //! 2. **Playwright Chromium** (headless, via `playwright-rs`): attempted
 //!    when the plain fetch trips bot-protection heuristics (challenge
 //!    interstitials such as Cloudflare, detected from status code, headers,
-//!    and body markers). The rendered DOM is re-checked; if it still looks
+//!    and body markers) **or** fails hard (network errors / timeouts, 5xx) —
+//!    a timeout on a datacenter IP is often Cloudflare dropping the request
+//!    before a block signal was visible, so the same render that clears a
+//!    wall applies. The rendered DOM is re-checked; if it still looks
 //!    like a bot wall or yields no usable content, the chain continues.
 //!    Requires Node.js on `PATH` and a one-time Chromium install. Disable
 //!    with `UNINEWS_PLAYWRIGHT=0`; tune the wait budget with
-//!    `UNINEWS_PLAYWRIGHT_TIMEOUT_MS` (default 45,000 ms).
-//! 3. **archive.org Wayback Machine** ([`archive`]): attempted for the
-//!    remaining bot walls and for hard failures — HTTP 5xx responses and
-//!    network errors (connect/read timeouts, DNS, TLS). The latest archived
-//!    snapshot of the URL is fetched and parsed instead. Disable with
-//!    `UNINEWS_ARCHIVE_FALLBACK=0`.
+//!    `UNINEWS_PLAYWRIGHT_TIMEOUT_MS` (default 45,000 ms). The host content
+//!    fallback ([`set_content_fallback`]) runs around this render and may
+//!    be consulted first via `UNINEWS_CONTENT_FALLBACK_FIRST`.
+//! 3. **archive.org Wayback Machine** ([`archive`]): the LAST fallback,
+//!    attempted only for the bot walls and hard failures (HTTP 5xx and
+//!    network errors: connect/read timeouts, DNS, TLS) that survived
+//!    rendering. The latest archived snapshot of the URL is fetched and
+//!    parsed instead. Disable with `UNINEWS_ARCHIVE_FALLBACK=0`.
 //!
 //! X.com / Twitter URLs follow their own chain (X API v2 → guest-token web
 //! GraphQL → headless-Chrome `--dump-dom` for guest-walled X Articles; see

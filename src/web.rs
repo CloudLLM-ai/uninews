@@ -20,9 +20,16 @@
 //!    yields nothing usable, the original plain-fetch result is kept, so
 //!    the trigger can never make a scrape worse. Thin-content pages are
 //!    not archive.org-eligible, so this render is their only fallback.
-//! 5. For remaining bot-protection walls and hard failures (network errors,
-//!    5xx): the archive.org Wayback Machine fallback ([`crate::archive`]).
-//! 6. LLM Markdown conversion of the extracted body ([`crate::llm`]).
+//! 5. For hard failures (network errors / timeouts, 5xx) and remaining
+//!    bot-protection walls: the SAME Playwright render (and host content
+//!    fallback) is attempted, because a timeout or 5xx on a datacenter IP
+//!    is often Cloudflare & co. dropping the request before the plain HTTP
+//!    fetch ever saw a block signal — a real browser / residential render
+//!    is exactly what clears it. The host content fallback may run first
+//!    via `UNINEWS_CONTENT_FALLBACK_FIRST` on known-doomed local renders.
+//! 6. For failures that survive rendering: the archive.org Wayback Machine
+//!    fallback ([`crate::archive`]) — the LAST fallback, not the first.
+//! 7. LLM Markdown conversion of the extracted body ([`crate::llm`]).
 
 use std::error::Error as StdError;
 use std::fmt::Write as _;
@@ -482,14 +489,17 @@ async fn try_host_content_fallback(url: &str, title_override: Option<&str>) -> O
 /// conversion.
 ///
 /// On failure the returned post carries the error in [`Post::error`].
-/// Playwright Chromium is tried first (unless disabled via
-/// `UNINEWS_PLAYWRIGHT=0`) for bot-protection walls and for thin-content
-/// pages — a successful (2xx), non-walled, non-X response whose extraction
-/// failed or whose raw body is under `JS_SHELL_MAX_BYTES`. When the render
-/// does not yield usable content the original plain-fetch post is kept
-/// untouched. Remaining bot walls and hard failures (network error, 5xx)
-/// then go through the archive.org Wayback Machine fallback (unless
-/// disabled via `UNINEWS_ARCHIVE_FALLBACK=0`); thin-content pages are not
+/// Playwright Chromium is tried (unless disabled via `UNINEWS_PLAYWRIGHT=0`)
+/// for bot-protection walls, for thin-content pages — a successful (2xx),
+/// non-walled, non-X response whose extraction failed or whose raw body is
+/// under `JS_SHELL_MAX_BYTES` — and for hard failures (network errors /
+/// timeouts, 5xx), where a silent Cloudflare drop is the likely cause. The
+/// host content fallback runs around this render (first via
+/// `UNINEWS_CONTENT_FALLBACK_FIRST` on known-doomed local renders). When
+/// the render does not yield usable content the original plain-fetch post is
+/// kept untouched. Remaining bot walls and hard failures then go through the
+/// archive.org Wayback Machine fallback as the LAST resort (unless disabled
+/// via `UNINEWS_ARCHIVE_FALLBACK=0`); thin-content pages are not
 /// archive-eligible, so Playwright is their only fallback.
 async fn scrape_web_url_raw_with_title_override(url: &str, title_override: Option<&str>) -> Post {
     // URLs whose real payload never appears in the page HTML (YouTube
@@ -526,22 +536,31 @@ async fn scrape_web_url_raw_with_title_override(url: &str, title_override: Optio
         return raw.post;
     }
 
-    // Bot-protection / thin content → Playwright before archive.org
-    // (fresher content, and the only fallback thin-content pages get).
+    // Bot protection / thin content / hard fetch failure → try a real
+    // browser (Playwright) and the host content fallback BEFORE archive.org.
+    // A timeout or 5xx on a datacenter IP is frequently the site's
+    // Cloudflare (or similar) dropping the request before the bot-protection
+    // signal is even visible — the plain HTTP fetch never learned it was
+    // walled. Rendering with a real browser (or the residential relay) is
+    // exactly the fallback that clears such blocks, so it must run here too,
+    // not only for visibly-walled or thin pages. archive.org stays the last
+    // resort (never the only one).
     let mut post_after_playwright = raw.post;
-    if raw.bot_protected || thin_content {
-        // Ordering for WALLS: when the operator knows the local render is
-        // doomed (datacenter IP the challenge will never pass), the host
+    let try_render = raw.bot_protected || thin_content || raw.network_failure || raw.server_error;
+    if try_render {
+        // Ordering for WALLS and hard failures: when the operator knows the
+        // local render is doomed (datacenter IP the challenge will never
+        // pass — the same cause behind a silent timeout / 5xx), the host
         // content fallback goes FIRST via UNINEWS_CONTENT_FALLBACK_FIRST,
         // saving the wasted ~60 s local attempt. Thin-content pages keep
         // local-Playwright-first ordering in every case — JS shells are
         // not IP-gated, so local renders work for them.
-        let hook_first_for_wall = raw.bot_protected
+        let hook_first = (raw.bot_protected || raw.network_failure || raw.server_error)
             && !thin_content
             && content_fallback_first()
             && content_fallback_hook().is_some();
 
-        if hook_first_for_wall {
+        if hook_first {
             if let Some(fallback_post) = try_host_content_fallback(url, title_override).await {
                 return fallback_post;
             }
@@ -566,10 +585,10 @@ async fn scrape_web_url_raw_with_title_override(url: &str, title_override: Optio
         // render, before archive.org. Covers walls the local render could
         // not pass and thin-content pages when local Playwright is
         // disabled or unavailable. On failure the chain below continues
-        // exactly as if the hook were absent. (When hook_first_for_wall
-        // fired above and failed, this second consultation is skipped —
-        // the hook already had its chance.)
-        if !hook_first_for_wall {
+        // exactly as if the hook were absent. (When hook_first fired above
+        // and failed, this second consultation is skipped — the hook
+        // already had its chance.)
+        if !hook_first {
             if let Some(fallback_post) = try_host_content_fallback(url, title_override).await {
                 return fallback_post;
             }
