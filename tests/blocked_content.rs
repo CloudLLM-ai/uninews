@@ -87,7 +87,6 @@ fn real_article_not_insufficient() {
 /// is flagged insufficient.
 #[test]
 fn insufficient_short_body_flagged() {
-    let html = r#"<html><body><article><p>Here is what happened in crypto today</p></article></body></html>"#;
     // Through the full parser this short article now surfaces InsufficientContent
     // only if the HTML layer is strict; with the current permissive thresholds
     // it still succeeds — the *thin-content trigger* and draft-side guard handle

@@ -1,3 +1,9 @@
+0.48.1 AUG/25/2026
+ - fix(llm): OpenRouter Markdown conversion explicitly disables hidden
+   reasoning so thinking models return content within the completion budget;
+   nullable provider content is reported as a useful conversion error by
+   cloudllm instead of a response-body decode failure.
+
 0.48.0 AUG/07/2026
 - Hard-failure fallback ordering fix: a plain-web fetch that TIMED OUT or
   returned a 5xx (a `network_failure` / `server_error`) previously skipped

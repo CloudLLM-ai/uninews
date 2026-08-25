@@ -27,6 +27,10 @@ use crate::Post;
 /// Default LLM client when `UNINEWS_LLM_CLIENT` is unset.
 const DEFAULT_LLM_CLIENT: &str = "openai";
 
+/// OpenRouter effort used for Markdown conversion. Structured conversion
+/// should not spend its completion budget on hidden reasoning.
+pub const UNINEWS_OPENROUTER_REASONING_EFFORT: &str = "none";
+
 /// Per-client default model slug, used when `UNINEWS_LLM_MODEL` is unset.
 ///
 /// Source of truth for the table in `README.md` → "LLM Providers" →
@@ -185,9 +189,13 @@ fn build_uninews_llm_client() -> Result<Arc<dyn ClientWrapper>, String> {
             let key = env::var("OPENROUTER_API_KEY").map_err(|_| {
                 "Please set the OPENROUTER_API_KEY environment variable.".to_string()
             })?;
-            Ok(Arc::new(OpenRouterClient::new_with_model_str(
-                &key, &model,
-            )))
+            Ok(Arc::new(
+                OpenRouterClient::new_with_model_str_and_reasoning_effort(
+                    &key,
+                    &model,
+                    Some(UNINEWS_OPENROUTER_REASONING_EFFORT),
+                ),
+            ))
         }
         "grok" => {
             let key = env::var("XAI_API_KEY")

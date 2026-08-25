@@ -4,7 +4,10 @@
 
 use std::env;
 
-use uninews::llm::{markdown_system_prompt, markdown_user_prompt, normalized_output_language};
+use uninews::llm::{
+    markdown_system_prompt, markdown_user_prompt, normalized_output_language,
+    UNINEWS_OPENROUTER_REASONING_EFFORT,
+};
 use uninews::{convert_content_to_markdown, Post};
 
 /// RAII helper: temporarily override an env var, restore on drop.
@@ -52,6 +55,11 @@ fn markdown_prompts_require_near_lossless_preservation() {
         .contains("Do not summarize, paraphrase, compress, or omit substantive details"));
     assert!(user_prompt.contains("Treat `content` as the canonical article body"));
     assert!(user_prompt.contains("keep it nearly verbatim"));
+}
+
+#[test]
+fn openrouter_markdown_conversion_disables_hidden_reasoning_by_default() {
+    assert_eq!(UNINEWS_OPENROUTER_REASONING_EFFORT, "none");
 }
 
 /// Prompt-injection hardening: the scraped Post JSON is untrusted data, so
