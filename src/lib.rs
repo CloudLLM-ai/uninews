@@ -108,6 +108,7 @@
 //! | `UNINEWS_LLM_CLIENT` | LLM provider for HTML → Markdown (`openai`, `openrouter`, `xai`, `grok`, `gemini`, `claude`) | `openai` |
 //! | `UNINEWS_LLM_MODEL` | Model override for the selected provider | provider default |
 //! | `UNINEWS_LLM_CONTEXT_WINDOW` | Context-window budget in tokens | 256,000 |
+//! | `UNINEWS_OPENROUTER_REASONING_EFFORT` | OpenRouter reasoning effort (`none`, `low`, `medium`, `high`) | `none` |
 //! | `OPEN_AI_SECRET` / `OPENROUTER_API_KEY` / `XAI_API_KEY` / `GEMINI_API_KEY` / `CLAUDE_API_KEY` | API key for the selected `UNINEWS_LLM_CLIENT` | — (required) |
 //! | `UNINEWS_PLAYWRIGHT` | Toggle the Playwright fallback (`0`/`false`/`no`/`off` disables) | enabled |
 //! | `UNINEWS_PLAYWRIGHT_TIMEOUT_MS` | Playwright navigation / content-wait budget in ms | 45,000 |

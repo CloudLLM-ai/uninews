@@ -6,7 +6,8 @@ use std::env;
 
 use uninews::llm::{
     markdown_system_prompt, markdown_user_prompt, normalized_output_language,
-    UNINEWS_OPENROUTER_REASONING_EFFORT,
+    openrouter_reasoning_effort, UNINEWS_OPENROUTER_REASONING_EFFORT,
+    UNINEWS_OPENROUTER_REASONING_EFFORT_ENV,
 };
 use uninews::{convert_content_to_markdown, Post};
 
@@ -60,6 +61,18 @@ fn markdown_prompts_require_near_lossless_preservation() {
 #[test]
 fn openrouter_markdown_conversion_disables_hidden_reasoning_by_default() {
     assert_eq!(UNINEWS_OPENROUTER_REASONING_EFFORT, "none");
+    assert_eq!(
+        UNINEWS_OPENROUTER_REASONING_EFFORT_ENV,
+        "UNINEWS_OPENROUTER_REASONING_EFFORT"
+    );
+}
+
+/// Verifies that model-specific OpenRouter reasoning overrides are read at
+/// conversion time rather than fixed at compile time.
+#[test]
+fn openrouter_markdown_conversion_reads_reasoning_override() {
+    let _guard = EnvVarGuard::set(UNINEWS_OPENROUTER_REASONING_EFFORT_ENV, "medium");
+    assert_eq!(openrouter_reasoning_effort(), "medium");
 }
 
 /// Prompt-injection hardening: the scraped Post JSON is untrusted data, so

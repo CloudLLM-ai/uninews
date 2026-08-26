@@ -193,6 +193,7 @@ third:
 | `UNINEWS_LLM_CLIENT` | `openai` | One of `openai`, `openrouter`, `grok`, `gemini`, `claude`. |
 | `UNINEWS_LLM_MODEL`  | per-client | Free-form model slug. If unset, each client falls back to the default listed in the table below (e.g. `gpt-5.6-sol` for `openai`, `openai/gpt-5.6-sol` for `openrouter`). For OpenRouter you usually want a `vendor/model` slug (e.g. `qwen/qwen3.7-max`). |
 | `UNINEWS_LLM_CONTEXT_WINDOW` | `256000` | LLM context-window budget (in tokens) used by `LLMSession` while formatting the Markdown. Bump this when the model you point at via `UNINEWS_LLM_MODEL` supports a larger context (e.g. Gemini-class 1M+ models) or a longer article blows past the default. Library callers can also pass `Some(n)` to `universal_scrape` / `convert_content_to_markdown` to override per call; the explicit argument always wins. Invalid or non-positive values fall back to the default. |
+| `UNINEWS_OPENROUTER_REASONING_EFFORT` | `none` | OpenRouter reasoning effort for Markdown conversion. Use `low`, `medium`, or `high` for models that require reasoning; leave unset for models that reject or do not need it. |
 
 Each provider reads its API key from a dedicated env var. Only the one matching
 the active `UNINEWS_LLM_CLIENT` is consulted. When `UNINEWS_LLM_MODEL` is unset,

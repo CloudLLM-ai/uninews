@@ -1,3 +1,9 @@
+0.48.2 AUG/26/2026
+ - Make OpenRouter reasoning effort configurable for Markdown conversion via
+   `UNINEWS_OPENROUTER_REASONING_EFFORT`. The default remains `none` for
+   models such as DeepSeek that do not require reasoning; models such as GLM
+   can set `low`, `medium`, or `high`.
+
 0.48.1 AUG/25/2026
  - fix(llm): OpenRouter Markdown conversion explicitly disables hidden
    reasoning so thinking models return content within the completion budget;
