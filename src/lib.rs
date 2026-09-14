@@ -91,6 +91,10 @@
 //!    `UNINEWS_PLAYWRIGHT_TIMEOUT_MS` (default 45,000 ms). The host content
 //!    fallback ([`set_content_fallback`]) runs around this render and may
 //!    be consulted first via `UNINEWS_CONTENT_FALLBACK_FIRST`.
+//!    The browser is shared per tokio runtime; hosts that create a
+//!    throwaway runtime per scrape must call [`close_shared_browser`]
+//!    before dropping it, or each runtime leaks its driver + Chromium
+//!    until the process hits `Too many open files`.
 //! 3. **archive.org Wayback Machine** ([`archive`]): the LAST fallback,
 //!    attempted only for the bot walls and hard failures (HTTP 5xx and
 //!    network errors: connect/read timeouts, DNS, TLS) that survived
@@ -192,9 +196,9 @@ pub use archive::{archive_fallback_enabled, ArchiveSnapshot, UNINEWS_ARCHIVE_FAL
 // and tests can configure the bot-protection browser path without reaching
 // into crate-private modules.
 pub use browser::{
-    fetch_rendered_dom_with_playwright, playwright_autoinstall_enabled, playwright_enabled,
-    DEFAULT_PLAYWRIGHT_TIMEOUT_MS, UNINEWS_PLAYWRIGHT_AUTOINSTALL_ENV, UNINEWS_PLAYWRIGHT_ENV,
-    UNINEWS_PLAYWRIGHT_TIMEOUT_MS_ENV,
+    close_shared_browser, fetch_rendered_dom_with_playwright, playwright_autoinstall_enabled,
+    playwright_enabled, DEFAULT_PLAYWRIGHT_TIMEOUT_MS, UNINEWS_PLAYWRIGHT_AUTOINSTALL_ENV,
+    UNINEWS_PLAYWRIGHT_ENV, UNINEWS_PLAYWRIGHT_TIMEOUT_MS_ENV,
 };
 #[doc(hidden)]
 pub use browser::{
