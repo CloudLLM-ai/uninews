@@ -228,8 +228,10 @@ pub fn playwright_overall_budget_ms() -> u64 {
 /// between scrapes).
 ///
 /// Lifecycle: the shared browser is intentionally NOT closed per scrape —
-/// it lives until process exit (the `Playwright` handle is kept alive in
-/// the cache because its `Drop` kills the Node driver process). Only the
+/// it is reused across scrapes on the same runtime and evicted via
+/// [`close_shared_browser`] (or the disconnected-entry purge) when the
+/// runtime is done. The `Playwright` handle is kept alive in
+/// the cache because its `Drop` kills the Node driver process. Only the
 /// per-scrape context is closed. A failed launch is NOT cached
 /// (`get_or_try_init` leaves the cell empty), so the next scrape retries
 /// and surfaces the same error. If the cached browser's connection died
@@ -249,23 +251,86 @@ struct SharedBrowser {
 /// runtime that launched it: using it from another runtime silently
 /// deadlocks in release (and panics in debug). Each `#[tokio::test]` gets
 /// its own runtime, and library users may too, so the cache is keyed by
-/// [`tokio::runtime::Id`]. Entries are never evicted; a dead runtime's
-/// browser simply lingers until process exit (test-only artifact).
+/// [`tokio::runtime::Id`].
+///
+/// Eviction (FD-leak hardening, 2026-09-14: a long-lived host creating one
+/// runtime per scrape command leaked a Node driver + Chromium per command
+/// until EMFILE): entries are dropped in two ways —
+/// 1. [`close_shared_browser`] — explicit, called by the runtime owner
+///    before shutting a throwaway runtime down. This is the primary path:
+///    dropping the cell kills the Node driver and frees its FDs.
+/// 2. Opportunistic — when a *new* runtime id arrives in
+///    [`shared_browser_cell`], entries whose browser is no longer connected
+///    (crash / OOM-kill) are purged so a dead browser never pins FDs while
+///    its runtime id is gone.
 static SHARED_BROWSERS: LazyLock<Mutex<HashMap<tokio::runtime::Id, Arc<OnceCell<SharedBrowser>>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Return the shared-browser cell for the *current* tokio runtime, creating
 /// it on first use. The std mutex guard never crosses an `.await`.
+///
+/// Before inserting a brand-new runtime id, purge entries whose cached
+/// browser has lost its connection (crashed / OOM-killed Chromium): they
+/// can never serve another scrape, so keeping them only pins dead FDs.
+/// Live entries — including ones owned by *other* still-running runtimes —
+/// are always retained.
 fn shared_browser_cell() -> Arc<OnceCell<SharedBrowser>> {
     let runtime_id = tokio::runtime::Handle::current().id();
     let mut caches = SHARED_BROWSERS
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if !caches.contains_key(&runtime_id) {
+        caches.retain(|_, cell| match cell.get() {
+            // Launch in flight (or not yet attempted) on another runtime —
+            // not ours to judge.
+            None => true,
+            Some(shared) => shared.browser.is_connected(),
+        });
+    }
     Arc::clone(
         caches
             .entry(runtime_id)
             .or_insert_with(|| Arc::new(OnceCell::const_new())),
     )
+}
+
+/// Close and evict the shared Playwright browser for the *current* tokio
+/// runtime, if one was launched.
+///
+/// Call this when no more scrapes will run on the current runtime and it is
+/// about to be shut down — e.g. a host that creates one `Runtime` per
+/// command must call it at the end of every command. Without it, the cached
+/// `Playwright` handle (whose `Drop` kills the Node driver process) lives in
+/// the process-wide cache forever: each throwaway runtime leaks a driver +
+/// Chromium, and a long-lived host eventually dies with `Too many open
+/// files` (os error 24). Dropping the evicted cell here kills the driver and
+/// frees its pipes/sockets; a later scrape on a new runtime simply launches
+/// a fresh browser.
+///
+/// Safe to call when no browser was ever launched (no-op) and safe to call
+/// while other tasks on the *same* runtime still hold the cell — the entry
+/// is removed so future scrapes relaunch, and the browser is dropped when
+/// the last in-flight holder finishes. Do NOT call it while scrapes are
+/// still expected on this runtime: they would pay a fresh launch each.
+///
+/// Must be called from inside the runtime being closed (call it via
+/// `runtime.block_on(...)` before dropping the runtime), so the drop of the
+/// driver/connection objects happens on a live runtime's worker thread.
+pub fn close_shared_browser() {
+    let runtime_id = match tokio::runtime::Handle::try_current() {
+        Ok(handle) => handle.id(),
+        // No runtime context — nothing attributable to close.
+        Err(_) => return,
+    };
+    let cell = SHARED_BROWSERS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(&runtime_id);
+    // Dropping the cell drops the SharedBrowser when this was the last
+    // holder, and `Playwright`'s Drop kills the Node driver process (which
+    // reaps its Chromium children). If sibling tasks still hold clones,
+    // the drop — and the driver kill — happens when the last one finishes.
+    drop(cell);
 }
 
 /// One-shot `install_browsers(chromium)` coordination cell.
