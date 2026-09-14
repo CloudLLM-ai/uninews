@@ -1,3 +1,16 @@
+0.48.3 SEP/14/2026
+ - fix(browser): plug the shared-browser FD leak that killed long-lived
+   hosts with `Too many open files` (os error 24). The per-runtime
+   Playwright/Chromium cache was never evicted, so every throwaway
+   `tokio::runtime::Runtime` that fired the Playwright fallback leaked a
+   Node driver + Chromium forever (one `dbtc_draft::run` per chat command
+   in canuto). New `uninews::close_shared_browser()` evicts the current
+   runtime's entry — dropping the cell kills the driver and frees its
+   pipes/sockets; call it via `runtime.block_on(...)` before dropping a
+   throwaway runtime. Plus a safety net: inserting a brand-new runtime id
+   now purges entries whose browser `is_connected() == false` (crashed /
+   OOM-killed) instead of pinning dead FDs.
+
 0.48.2 AUG/26/2026
  - Make OpenRouter reasoning effort configurable for Markdown conversion via
    `UNINEWS_OPENROUTER_REASONING_EFFORT`. The default remains `none` for
