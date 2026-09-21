@@ -253,45 +253,85 @@ struct SharedBrowser {
 /// its own runtime, and library users may too, so the cache is keyed by
 /// [`tokio::runtime::Id`].
 ///
-/// Eviction (FD-leak hardening, 2026-09-14: a long-lived host creating one
-/// runtime per scrape command leaked a Node driver + Chromium per command
-/// until EMFILE): entries are dropped in two ways —
+/// Eviction (FD-leak hardening): entries are dropped in three ways —
 /// 1. [`close_shared_browser`] — explicit, called by the runtime owner
-///    before shutting a throwaway runtime down. This is the primary path:
-///    dropping the cell kills the Node driver and frees its FDs.
-/// 2. Opportunistic — when a *new* runtime id arrives in
-///    [`shared_browser_cell`], entries whose browser is no longer connected
-///    (crash / OOM-kill) are purged so a dead browser never pins FDs while
-///    its runtime id is gone.
+///    before shutting a throwaway runtime down. Preferred: the drop runs
+///    on a live worker.
+/// 2. [`RuntimeBrowserReaper`] — armed the first time a runtime touches
+///    the cache. When that runtime shuts down, the reaper task is dropped
+///    and evicts the entry even if the browser is still connected. This is
+///    the backstop for hosts that create one runtime per scrape and forget
+///    to close (dbtc_scout's per-source runtime, 2026-09-21: 332 leaked
+///    Node drivers under canuto). The 2026-09-14 purge did not catch this:
+///    it only drops browsers that already report `is_connected() == false`,
+///    and an unreaped driver stays connected forever.
+/// 3. Opportunistic — when a *new* runtime id arrives, entries whose
+///    browser is no longer connected (crash / OOM-kill) are purged.
 static SHARED_BROWSERS: LazyLock<Mutex<HashMap<tokio::runtime::Id, Arc<OnceCell<SharedBrowser>>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Drops the shared-browser cache entry for one runtime.
+///
+/// Lives inside a task spawned on that runtime. The task is aborted when
+/// the runtime shuts down, and this `Drop` then evicts the cache so
+/// `Playwright`'s `Drop` kills the Node driver. Must be polled at least
+/// once (see [`arm_runtime_reaper`]) or the guard is never constructed.
+struct RuntimeBrowserReaper(tokio::runtime::Id);
+
+impl Drop for RuntimeBrowserReaper {
+    fn drop(&mut self) {
+        let cell = SHARED_BROWSERS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&self.0);
+        drop(cell);
+    }
+}
+
+/// Spawn the shutdown reaper and poll it once so the guard is armed
+/// before the caller can drop the runtime.
+async fn arm_runtime_reaper(runtime_id: tokio::runtime::Id) {
+    tokio::spawn(async move {
+        let _guard = RuntimeBrowserReaper(runtime_id);
+        std::future::pending::<()>().await;
+    });
+    tokio::task::yield_now().await;
+}
 
 /// Return the shared-browser cell for the *current* tokio runtime, creating
 /// it on first use. The std mutex guard never crosses an `.await`.
 ///
 /// Before inserting a brand-new runtime id, purge entries whose cached
-/// browser has lost its connection (crashed / OOM-killed Chromium): they
-/// can never serve another scrape, so keeping them only pins dead FDs.
-/// Live entries — including ones owned by *other* still-running runtimes —
-/// are always retained.
-fn shared_browser_cell() -> Arc<OnceCell<SharedBrowser>> {
+/// browser has lost its connection (crashed / OOM-killed Chromium).
+/// Still-connected entries of *other* runtimes are retained; a runtime
+/// that has already shut down is evicted by [`RuntimeBrowserReaper`], not
+/// by this retain (a leaked driver stays `is_connected()`).
+async fn shared_browser_cell() -> Arc<OnceCell<SharedBrowser>> {
     let runtime_id = tokio::runtime::Handle::current().id();
-    let mut caches = SHARED_BROWSERS
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if !caches.contains_key(&runtime_id) {
-        caches.retain(|_, cell| match cell.get() {
-            // Launch in flight (or not yet attempted) on another runtime —
-            // not ours to judge.
-            None => true,
-            Some(shared) => shared.browser.is_connected(),
-        });
+    let (cell, arm_reaper) = {
+        let mut caches = SHARED_BROWSERS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !caches.contains_key(&runtime_id) {
+            caches.retain(|_, cell| match cell.get() {
+                // Launch in flight (or not yet attempted) on another runtime —
+                // not ours to judge.
+                None => true,
+                Some(shared) => shared.browser.is_connected(),
+            });
+        }
+        let arm_reaper = !caches.contains_key(&runtime_id);
+        let cell = Arc::clone(
+            caches
+                .entry(runtime_id)
+                .or_insert_with(|| Arc::new(OnceCell::const_new())),
+        );
+        (cell, arm_reaper)
+    };
+    if arm_reaper {
+        arm_runtime_reaper(runtime_id).await;
     }
-    Arc::clone(
-        caches
-            .entry(runtime_id)
-            .or_insert_with(|| Arc::new(OnceCell::const_new())),
-    )
+    cell
 }
 
 /// Close and evict the shared Playwright browser for the *current* tokio
@@ -299,13 +339,13 @@ fn shared_browser_cell() -> Arc<OnceCell<SharedBrowser>> {
 ///
 /// Call this when no more scrapes will run on the current runtime and it is
 /// about to be shut down — e.g. a host that creates one `Runtime` per
-/// command must call it at the end of every command. Without it, the cached
-/// `Playwright` handle (whose `Drop` kills the Node driver process) lives in
-/// the process-wide cache forever: each throwaway runtime leaks a driver +
-/// Chromium, and a long-lived host eventually dies with `Too many open
-/// files` (os error 24). Dropping the evicted cell here kills the driver and
-/// frees its pipes/sockets; a later scrape on a new runtime simply launches
-/// a fresh browser.
+/// command should call it at the end of every command, before dropping the
+/// runtime, so the driver kill runs on a live worker. Dropping the evicted
+/// cell kills the Node driver and frees its pipes/sockets; a later scrape
+/// on a new runtime simply launches a fresh browser. If the host forgets,
+/// the runtime-drop reaper still evicts the entry when the runtime shuts
+/// down — that backstop exists because a forgotten close leaked one driver
+/// per scrape under long-lived canuto.
 ///
 /// Safe to call when no browser was ever launched (no-op) and safe to call
 /// while other tasks on the *same* runtime still hold the cell — the entry
@@ -791,7 +831,7 @@ async fn render_dom_attempt(url: &str) -> Result<String, String> {
     // whole attempt when the cached one died; dropping the `Playwright`
     // handle would kill the Node driver process mid-scrape.
     let fresh;
-    let cell = shared_browser_cell();
+    let cell = shared_browser_cell().await;
     let browser = {
         // A failed launch is not cached: the next scrape retries and
         // surfaces the same error again.
@@ -871,4 +911,36 @@ async fn render_dom_attempt(url: &str) -> Result<String, String> {
     let _ = context.close().await;
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{shared_browser_cell, SHARED_BROWSERS};
+
+    #[test]
+    fn dropping_throwaway_runtime_evicts_its_browser_cache_entry() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let runtime_id = runtime.block_on(async {
+            let _cell = shared_browser_cell().await;
+            tokio::runtime::Handle::current().id()
+        });
+        assert!(
+            SHARED_BROWSERS
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .contains_key(&runtime_id),
+            "cache entry must exist while the runtime is alive"
+        );
+        drop(runtime);
+        assert!(
+            !SHARED_BROWSERS
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .contains_key(&runtime_id),
+            "dropping the runtime must evict its cache entry even if no browser launched"
+        );
+    }
 }

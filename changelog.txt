@@ -1,4 +1,14 @@
-0.48.3 SEP/14/2026
+ 0.48.4 SEP/21/2026
+  - fix(browser): throwaway runtimes no longer leak a Playwright Node
+    driver + Chromium when the host forgets `close_shared_browser()`.
+    The 0.48.3 purge only dropped browsers that already reported
+    disconnected, so a still-running driver cached under a dead runtime
+    id lived until process exit (332 drivers under dbtc_canuto). The
+    first touch of the per-runtime cache now arms a shutdown reaper that
+    evicts the entry when that runtime drops. Callers should still close
+    explicitly so the kill runs on a live worker.
+
+ 0.48.3 SEP/14/2026
  - fix(browser): plug the shared-browser FD leak that killed long-lived
    hosts with `Too many open files` (os error 24). The per-runtime
    Playwright/Chromium cache was never evicted, so every throwaway

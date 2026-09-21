@@ -91,10 +91,10 @@
 //!    `UNINEWS_PLAYWRIGHT_TIMEOUT_MS` (default 45,000 ms). The host content
 //!    fallback ([`set_content_fallback`]) runs around this render and may
 //!    be consulted first via `UNINEWS_CONTENT_FALLBACK_FIRST`.
-//!    The browser is shared per tokio runtime; hosts that create a
-//!    throwaway runtime per scrape must call [`close_shared_browser`]
-//!    before dropping it, or each runtime leaks its driver + Chromium
-//!    until the process hits `Too many open files`.
+//!    The browser is shared per tokio runtime. Hosts that create a
+//!    throwaway runtime per scrape should call [`close_shared_browser`]
+//!    before dropping it. If they don't, a shutdown reaper evicts that
+//!    runtime's cache entry so the Node driver is killed anyway.
 //! 3. **archive.org Wayback Machine** ([`archive`]): the LAST fallback,
 //!    attempted only for the bot walls and hard failures (HTTP 5xx and
 //!    network errors: connect/read timeouts, DNS, TLS) that survived
