@@ -11,8 +11,8 @@ use serde_json::json;
 use uninews::html::parse_scraped_post_from_html;
 use uninews::x::{
     extract_tweet_id, is_x_article_url, is_x_url, parse_x_search_tweets, parse_x_web_article_post,
-    x_article_body_unavailable, x_article_plain_text, x_linked_article_url, x_post_is_link_only,
-    XArticleMeta, XTweet,
+    x_article_body_unavailable, x_article_plain_text, x_linked_article_url, x_post_is_article,
+    x_post_is_link_only, XArticleMeta, XTweet,
 };
 
 /// Build an `XTweet` carrying a single URL entity, mirroring the relevant
@@ -153,6 +153,70 @@ fn x_post_is_not_link_only_when_text_remains() {
     );
 
     assert!(!x_post_is_link_only(&tweet));
+}
+
+// ── x_post_is_article ─────────────────────────────────────────────────────
+
+/// Regression (2026-10-23, x.com/bscholl/status/2113359011445932198): X
+/// now publishes article posts with a teaser sentence before the `t.co`
+/// link, so the post is NOT link-only. It must still be classified as an
+/// article so the embedded `article.plain_text` is used instead of the
+/// ~200-char tweet text.
+#[test]
+fn x_post_is_article_when_teaser_text_precedes_article_link() {
+    let tweet: XTweet = serde_json::from_value(json!({
+        "id": "2113359011445932198",
+        "text": "Today Boom unveils our first completed supersonic turbine core https://t.co/q2KpL3dZi2",
+        "article": {
+            "title": "A Turbine, a Superfactory, and the World's Most Advanced Foundry",
+            "plain_text": "Today Boom unveils three major milestones...",
+            "preview_text": "Today Boom unveils three major milestones",
+            "cover_media": "3_2113342571682656256",
+            "entities": { "urls": [ { "text": "boomsupersonic.com/careers" } ] },
+            "media_entities": ["3_2113342467441643520"]
+        },
+        "entities": { "urls": [ {
+            "url": "https://t.co/q2KpL3dZi2",
+            "expanded_url": "https://x.com/i/article/2113342271915773952",
+            "unwound_url": "https://x.com/i/article/2113342271915773952",
+            "status": 404
+        } ] }
+    }))
+    .expect("live-shaped article tweet JSON must deserialize");
+
+    assert!(!x_post_is_link_only(&tweet));
+    assert!(x_post_is_article(&tweet));
+}
+
+/// A tweet linking to an X Article is an article post even when the v2
+/// payload omits the `article` field (body then comes from the fallbacks).
+#[test]
+fn x_post_is_article_from_article_link_alone() {
+    let tweet = tweet_with_url_entity(
+        "Lean esto https://t.co/abc",
+        json!({
+            "url": "https://t.co/abc",
+            "expanded_url": "https://x.com/i/article/123",
+            "unwound_url": null,
+        }),
+    );
+
+    assert!(x_post_is_article(&tweet));
+}
+
+/// Plain tweets and tweets sharing external links are not article posts.
+#[test]
+fn x_post_is_not_article_for_external_links() {
+    let tweet = tweet_with_url_entity(
+        "Analisis completo https://t.co/abc",
+        json!({
+            "url": "https://t.co/abc",
+            "expanded_url": "https://www.diariobitcoin.com/test-article",
+            "unwound_url": null,
+        }),
+    );
+
+    assert!(!x_post_is_article(&tweet));
 }
 
 // ── x_article_plain_text ──────────────────────────────────────────────────

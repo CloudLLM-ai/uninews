@@ -810,17 +810,48 @@ pub fn parse_x_search_tweets(body: &str) -> Result<Vec<XTweet>, String> {
     Ok(response.data.unwrap_or_default())
 }
 
-/// Follow a link-only tweet to its article and scrape it.
+/// Returns the first X Article URL (`/i/article/<id>`) in `urls`, if any.
+fn x_article_url_in(urls: &[String]) -> Option<&str> {
+    urls.iter()
+        .map(String::as_str)
+        .find(|candidate| is_x_article_url(candidate))
+}
+
+/// Returns `true` when `tweet` is an X Article post: it carries an
+/// `article` payload or links to an `/i/article/` URL.
+///
+/// This must not depend on the tweet text being link-only. Since 2026-10 X
+/// publishes article posts with a teaser sentence before the `t.co` link;
+/// gating on link-only sent those through the thread path and converted
+/// only the ~200-char teaser.
+pub fn x_post_is_article(tweet: &XTweet) -> bool {
+    x_post_is_article_with_urls(tweet, &x_text_urls(tweet))
+}
+
+/// Article check against a precomputed URL list (see [`x_text_urls`]).
+fn x_post_is_article_with_urls(tweet: &XTweet, urls: &[String]) -> bool {
+    tweet.article.is_some() || x_article_url_in(urls).is_some()
+}
+
+/// Attach `context` to a failed fallback scrape, keeping its partial fields.
+fn with_error_context(post: Post, context: String) -> Post {
+    if post.error.is_empty() {
+        return post;
+    }
+    let error = format!("{}: {}", context, post.error);
+    Post { error, ..post }
+}
+
+/// Scrape an X Article post.
 ///
 /// Resolution order: the article body embedded in the v2 tweet payload,
-/// then X's web GraphQL endpoint for X Article links (with an HTML scrape
-/// fallback), then a plain HTML scrape of the linked article. Returns
-/// `None` when the tweet carries no resolvable external article URL, in
-/// which case the caller falls back to treating it as a regular tweet.
-async fn scrape_link_only_tweet(
+/// then X's web GraphQL endpoint, then an HTML scrape of `article_url`.
+/// Returns `None` only when there is no embedded body and no article URL
+/// to try, in which case the caller treats the post as a regular tweet.
+async fn scrape_x_article_tweet(
     client: &Client,
     root_tweet: &XTweet,
-    root_urls: &[String],
+    article_url: Option<&str>,
     author_display: Option<String>,
     profile_image: String,
     language: &str,
@@ -830,9 +861,8 @@ async fn scrape_link_only_tweet(
         .article
         .as_ref()
         .and_then(|article| article.title.as_deref());
-    let embedded_article_body = root_tweet.article.as_ref().and_then(x_article_plain_text);
 
-    if let Some(content) = embedded_article_body {
+    if let Some(content) = root_tweet.article.as_ref().and_then(x_article_plain_text) {
         let scraped_article_post = Post {
             title: article_title_override
                 .map(str::trim)
@@ -851,73 +881,85 @@ async fn scrape_link_only_tweet(
         );
     }
 
-    let article_url = resolve_x_linked_article_url(client, root_urls).await?;
-
-    if is_x_article_url(&article_url) {
-        match scrape_x_article_from_web_graphql(
-            client,
-            &root_tweet.id,
-            article_title_override,
-            root_tweet.created_at.clone(),
-            author_display.clone(),
-        )
-        .await
-        {
-            Ok(scraped_article_post) => {
-                return Some(
-                    markdown_or_error_post(scraped_article_post, language, context_window_tokens)
-                        .await,
-                );
-            }
-            Err(graphql_error) => {
-                let article_post = scrape_web_url_with_title_override(
-                    &article_url,
-                    language,
-                    article_title_override,
-                    context_window_tokens,
-                )
-                .await;
-                if article_post.error.is_empty() {
-                    return Some(article_post);
-                }
-
-                return Some(Post {
-                    title: article_post.title,
-                    content: article_post.content,
-                    featured_image_url: article_post.featured_image_url,
-                    publication_date: article_post.publication_date,
-                    author: article_post.author,
-                    error: format!(
-                        "Failed to scrape linked X article {} via X web GraphQL: {}. HTML fallback failed: {}",
-                        article_url, graphql_error, article_post.error
-                    ),
-                });
-            }
+    let article_url = article_url?;
+    let graphql_error = match scrape_x_article_from_web_graphql(
+        client,
+        &root_tweet.id,
+        article_title_override,
+        root_tweet.created_at.clone(),
+        author_display,
+    )
+    .await
+    {
+        Ok(scraped_article_post) => {
+            return Some(
+                markdown_or_error_post(scraped_article_post, language, context_window_tokens).await,
+            );
         }
-    }
+        Err(graphql_error) => graphql_error,
+    };
 
     let article_post = scrape_web_url_with_title_override(
-        &article_url,
+        article_url,
         language,
         article_title_override,
         context_window_tokens,
     )
     .await;
-    if article_post.error.is_empty() {
-        return Some(article_post);
+    Some(with_error_context(
+        article_post,
+        format!(
+            "Failed to scrape linked X article {} via X web GraphQL: {}. HTML fallback failed",
+            article_url, graphql_error
+        ),
+    ))
+}
+
+/// Follow a link-only tweet to its external article and scrape it.
+///
+/// Returns `None` when the tweet carries no resolvable external article
+/// URL, in which case the caller falls back to treating it as a regular
+/// tweet. A `t.co` link that only redirects to an X Article is routed to
+/// [`scrape_x_article_tweet`].
+async fn scrape_link_only_tweet(
+    client: &Client,
+    root_tweet: &XTweet,
+    root_urls: &[String],
+    author_display: Option<String>,
+    profile_image: String,
+    language: &str,
+    context_window_tokens: Option<usize>,
+) -> Option<Post> {
+    let article_url = resolve_x_linked_article_url(client, root_urls).await?;
+
+    if is_x_article_url(&article_url) {
+        return scrape_x_article_tweet(
+            client,
+            root_tweet,
+            Some(&article_url),
+            author_display,
+            profile_image,
+            language,
+            context_window_tokens,
+        )
+        .await;
     }
 
-    Some(Post {
-        title: article_post.title,
-        content: article_post.content,
-        featured_image_url: article_post.featured_image_url,
-        publication_date: article_post.publication_date,
-        author: article_post.author,
-        error: format!(
-            "Failed to scrape linked article {}: {}",
-            article_url, article_post.error
-        ),
-    })
+    let title_override = root_tweet
+        .article
+        .as_ref()
+        .and_then(|article| article.title.as_deref());
+    let article_post = scrape_web_url_with_title_override(
+        &article_url,
+        language,
+        title_override,
+        context_window_tokens,
+    )
+    .await;
+    Some(with_error_context(
+        article_post,
+        format!("Failed to scrape linked article {}", article_url),
+    ))
 }
 
 /// Fetches a tweet or X thread via the Twitter/X API v2 and returns a [`Post`].
@@ -1069,6 +1111,22 @@ pub(crate) async fn scrape_x_url(
     // Compute the tweet's URL list once for the link-only check and the
     // article resolution below (I9: was recomputed up to 3x per scrape).
     let root_urls = x_text_urls(&root_tweet);
+
+    if x_post_is_article_with_urls(&root_tweet, &root_urls) {
+        if let Some(post) = scrape_x_article_tweet(
+            client,
+            &root_tweet,
+            x_article_url_in(&root_urls),
+            author_display.clone(),
+            profile_image.clone(),
+            language,
+            context_window_tokens,
+        )
+        .await
+        {
+            return post;
+        }
+    }
 
     if x_post_is_link_only_with_urls(&root_tweet, &root_urls) {
         if let Some(post) = scrape_link_only_tweet(

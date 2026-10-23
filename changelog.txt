@@ -1,3 +1,13 @@
+ 0.48.5 OCT/23/2026
+  - fix(x): X Article posts whose tweet text carries a teaser sentence
+    before the `t.co` link were scraped as plain tweets (~200 chars). The
+    embedded `article.plain_text` body was only used for link-only posts;
+    X changed article posts to include teaser text. New
+    `x::x_post_is_article` (article payload or `/i/article/` link) now
+    routes the post to the article path before the link-only check.
+    Note: X's guest GraphQL `TweetResultByRestId` now returns
+    `article: null` for guests, so the API v2 body is the working path.
+
  0.48.4 SEP/21/2026
   - fix(browser): throwaway runtimes no longer leak a Playwright Node
     driver + Chromium when the host forgets `close_shared_browser()`.
