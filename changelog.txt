@@ -1,4 +1,4 @@
- UNRELEASED
+ 0.48.6 OCT/29/2026
   - security: update rustls from 0.23.43 to 0.23.45 in Cargo.lock
     to address GHSA-2mjx-qc3c-rqvc.
   - security: update rustls from 0.23.45 to 0.23.46 in Cargo.lock
