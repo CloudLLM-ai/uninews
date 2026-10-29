@@ -1419,6 +1419,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "dirs"
+version = "7.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d57d423b3c82e89b9a24ca3091fee61f456a26edbd28d26c65906f4bc1dcd8f"
+dependencies = [
+ "dirs-sys",
+]
+
+[[package]]
 name = "dirs-sys"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1977,12 +1986,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "glob"
-version = "0.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
-
-[[package]]
 name = "h2"
 version = "0.4.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2069,7 +2072,7 @@ version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aef3982638978efa195ff11b305f51f1f22f4f0a6cabee7af79b383ebee6a213"
 dependencies = [
- "dirs",
+ "dirs 6.0.0",
  "http",
  "indicatif",
  "libc",
@@ -2900,7 +2903,7 @@ dependencies = [
  "uuid",
  "walkdir",
  "x509-parser",
- "zip 9.1.3",
+ "zip",
 ]
 
 [[package]]
@@ -3731,17 +3734,19 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
 name = "playwright-rs"
-version = "0.15.1"
+version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5494109d443fafc48515b6c0442c1ab48e2631a111b2b68551dcdb7ef7fb72cf"
+checksum = "da16d75a7a31d13049a296ba721c9f9c13702467e68c5f2e0eeb845948ddc411"
 dependencies = [
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
- "dirs",
+ "dirs 7.0.0",
  "flate2",
  "futures-util",
- "glob",
+ "http",
+ "http-body",
+ "http-body-util",
  "libc",
  "parking_lot",
  "playwright-rs-macros",
@@ -3753,17 +3758,18 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tokio-tungstenite",
+ "tower",
  "tracing",
  "ureq",
  "url",
- "zip 8.6.0",
+ "zip",
 ]
 
 [[package]]
 name = "playwright-rs-macros"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "98c99f415553cb835d9c492c217207bda0fa56e229a863eb8ab79f5d6a8774f1"
+checksum = "861068e12cb3566c6abadd002270955bc43ffbe616bcac00cd3b4666be4834b5"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5758,12 +5764,6 @@ dependencies = [
 
 [[package]]
 name = "typed-path"
-version = "0.12.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e28f89b80c87b8fb0cf04ab448d5dd0dd0ade2f8891bae878de66a75a28600e"
-
-[[package]]
-name = "typed-path"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ce898823d8cd0f028662d2f349694b1af0a5cc9be83f1d213a00d3147445e1e"
@@ -6704,20 +6704,6 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "8.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d04a6b5381502aa6087c94c669499eb1602eb9c5e8198e534de571f7154809b"
-dependencies = [
- "crc32fast",
- "flate2",
- "indexmap",
- "memchr",
- "typed-path 0.12.3",
- "zopfli",
-]
-
-[[package]]
-name = "zip"
 version = "9.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1156b39d142a34b999c2310a50455e0cb3760bf7efad0122f796d813bee26ccb"
@@ -6728,7 +6714,7 @@ dependencies = [
  "indexmap",
  "memchr",
  "nix 0.31.3",
- "typed-path 0.13.0",
+ "typed-path",
  "windows-sys 0.61.2",
  "zopfli",
 ]
