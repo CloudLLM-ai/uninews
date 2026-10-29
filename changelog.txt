@@ -1,6 +1,9 @@
  UNRELEASED
   - security: update rustls from 0.23.43 to 0.23.45 in Cargo.lock
     to address GHSA-2mjx-qc3c-rqvc.
+  - security: update rustls from 0.23.45 to 0.23.46 in Cargo.lock
+    to address GHSA-vp88-798v-h67f, GHSA-w44r-93j7-qv28,
+    GHSA-c8m5-c952-6cm4 and GHSA-h2v8-394m-p7vv.
 
  0.48.5 OCT/23/2026
   - fix(x): X Article posts whose tweet text carries a teaser sentence
