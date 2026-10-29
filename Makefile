@@ -20,26 +20,26 @@ fmt:  ## Format the code using cargo fmt
 	${CARGO_CMD} fmt
 
 # Check for errors without building
-check:  ## Run cargo check to analyze the code without compiling
-	${CARGO_CMD} check
+check:  ## Run cargo check --release to analyze the code without compiling
+	${CARGO_CMD} check --release
 
 # Strict linter, fails on warning and suggests fixes
 clippy: ## Checks a package to catch common mistakes and improve your Rust code
 	${CARGO_CMD} fmt
-	${CARGO_CMD} clippy --package uninews --lib
-	${CARGO_CMD} clippy -- -D warnings
+	${CARGO_CMD} clippy --release --package uninews --lib
+	${CARGO_CMD} clippy --release -- -D warnings
 
 # Run tests
-test:  ## Run tests using cargo test
-	${CARGO_CMD} test
+test:  ## Run tests using cargo test --release
+	${CARGO_CMD} test --release
 
 # Install the binary
 install:  ## Install the binary to Cargo's global bin directory
 	${CARGO_CMD} install --path .
 
 # Generate documentation
-doc:  ## Generate project documentation using cargo doc
-	${CARGO_CMD} doc
+doc:  ## Generate project documentation using cargo doc --release
+	${CARGO_CMD} doc --release
 
 # Publish to crates.io
 publish: ## Publish the crate to crates.io
