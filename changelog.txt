@@ -1,3 +1,7 @@
+ UNRELEASED
+  - security: update rustls from 0.23.43 to 0.23.45 in Cargo.lock
+    to address GHSA-2mjx-qc3c-rqvc.
+
  0.48.5 OCT/23/2026
   - fix(x): X Article posts whose tweet text carries a teaser sentence
     before the `t.co` link were scraped as plain tweets (~200 chars). The
