@@ -752,24 +752,22 @@ dependencies = [
 
 [[package]]
 name = "cloudllm"
-version = "0.15.14"
+version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0a18d916474090906d9e6952074b5f99ed7a5bd20b82fa4f94f0620e002e981"
+checksum = "e48227dca51d0bdd7c7622b8429ae0d6f48e2405a2118549774ed0696ee10552"
 dependencies = [
  "async-trait",
  "chrono",
- "cloudllm_mcp",
+ "cloudllm_mcp 0.4.1",
  "env_logger",
  "evalexpr",
  "futures-util",
- "lazy_static",
  "log",
  "mentisdb",
- "openai-rust2",
- "reqwest 0.12.28",
+ "openai-rust2 2.0.0",
+ "reqwest 0.13.5",
  "serde",
  "serde_json",
- "sha2 0.10.9",
  "subtle",
  "tokio",
  "urlencoding",
@@ -789,6 +787,25 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "subtle",
+ "tokio",
+ "tokio-stream",
+]
+
+[[package]]
+name = "cloudllm_mcp"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5f1044900119c770c7d443241e8203893bc5d63e384a08c41c950ea8f511fe7"
+dependencies = [
+ "async-trait",
+ "axum",
+ "futures",
+ "log",
+ "reqwest 0.13.5",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
  "subtle",
  "tokio",
  "tokio-stream",
@@ -2868,7 +2885,7 @@ dependencies = [
  "axum-server",
  "bincode",
  "chrono",
- "cloudllm_mcp",
+ "cloudllm_mcp 0.3.6",
  "crossterm",
  "dashmap",
  "diffy",
@@ -2880,11 +2897,11 @@ dependencies = [
  "if-addrs",
  "libc",
  "log",
- "openai-rust2",
+ "openai-rust2 1.7.6",
  "rand_pcg 0.3.1",
  "ratatui",
  "rcgen",
- "reqwest 0.13.4",
+ "reqwest 0.13.5",
  "roaring",
  "rodio",
  "rust-stemmers",
@@ -3377,6 +3394,23 @@ dependencies = [
  "futures-util",
  "lazy_static",
  "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "openai-rust2"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8950e7a4d18116b2235895ef4c47077ecb301c1f71626448e222c0f4dd5efd5"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "bytes",
+ "futures-util",
+ "lazy_static",
+ "reqwest 0.13.5",
  "serde",
  "serde_json",
  "tokio",
@@ -4388,20 +4422,21 @@ dependencies = [
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
- "wasm-streams",
+ "wasm-streams 0.4.2",
  "web-sys",
 ]
 
 [[package]]
 name = "reqwest"
-version = "0.13.4"
+version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "219c5811de6525e5416c7d5d53bb656d3afdbc6c5af816e0802bcfa42dbdc1c3"
+checksum = "16a1cfa75cc186dd73d5818e510e042e40927bccc9c236b061cea97e1eb08029"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
  "encoding_rs",
  "futures-core",
+ "futures-util",
  "h2",
  "http",
  "http-body",
@@ -4422,16 +4457,19 @@ dependencies = [
  "rustls-platform-verifier",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "sync_wrapper",
  "tokio",
  "tokio-native-tls",
  "tokio-rustls",
+ "tokio-util",
  "tower",
  "tower-http",
  "tower-service",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasm-streams 0.5.0",
  "web-sys",
 ]
 
@@ -5826,12 +5864,12 @@ checksum = "39ec24b3121d976906ece63c9daad25b85969647682eee313cb5779fdd69e14e"
 
 [[package]]
 name = "uninews"
-version = "0.48.6"
+version = "0.48.7"
 dependencies = [
  "clap",
  "cloudllm",
  "playwright-rs",
- "reqwest 0.13.4",
+ "reqwest 0.13.5",
  "scraper",
  "serde",
  "serde_json",
@@ -6073,6 +6111,19 @@ name = "wasm-streams"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "15053d8d85c7eccdbefef60f06769760a563c7f0a9d6902a13d35c7800b0ad65"
+dependencies = [
+ "futures-util",
+ "js-sys",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
+name = "wasm-streams"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d1ec4f6517c9e11ae630e200b2b65d193279042e28edd4a2cda233e46670bbb"
 dependencies = [
  "futures-util",
  "js-sys",

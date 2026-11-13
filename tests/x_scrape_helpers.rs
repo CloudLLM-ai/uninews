@@ -414,3 +414,57 @@ fn parse_x_search_tweets_accepts_empty_result_set() {
         .expect("empty result set must parse");
     assert!(tweets.is_empty());
 }
+
+// ── note_tweet (long posts) ───────────────────────────────────────────────
+// 2026-11-13: long X posts came back cut at ~280 characters plus a "show
+// more" t.co link (David Sacks / Will Depue posts); dbtc_draft then refused
+// them as an incomplete source. The full text is in `note_tweet`.
+
+#[test]
+fn long_post_uses_note_tweet_text_and_entities() {
+    let tweet: XTweet = serde_json::from_value(json!({
+        "id": "2120992457630326841",
+        "text": "I have a major result to share.\n\nThis sounds insane, https://t.co/qlttvJsXG7",
+        "entities": { "urls": [{
+            "url": "https://t.co/qlttvJsXG7",
+            "expanded_url": "https://x.com/i/web/status/2120992457630326841"
+        }]},
+        "note_tweet": {
+            "text": "I have a major result to share.\n\nThis sounds insane, but I discovered that almost every AI model carries a hidden signature of the GPU that trained it. Paper: https://t.co/abc",
+            "entities": { "urls": [{
+                "url": "https://t.co/abc",
+                "expanded_url": "https://example.com/paper"
+            }]}
+        }
+    }))
+    .unwrap();
+    assert!(tweet.text().contains("hidden signature of the GPU"));
+    assert!(!tweet.text().contains("qlttvJsXG7"));
+    assert_eq!(
+        x_linked_article_url(&tweet).as_deref(),
+        Some("https://example.com/paper")
+    );
+}
+
+#[test]
+fn short_post_without_note_tweet_keeps_text() {
+    let tweet: XTweet = serde_json::from_value(json!({
+        "id": "1",
+        "text": "Bitcoin just crossed $100k.",
+        "note_tweet": { "text": "  " }
+    }))
+    .unwrap();
+    assert_eq!(tweet.text(), "Bitcoin just crossed $100k.");
+}
+
+#[test]
+fn search_results_get_note_tweet_text_too() {
+    let body = json!({ "data": [{
+        "id": "2",
+        "text": "Thread part cut… https://t.co/x",
+        "note_tweet": { "text": "Thread part with the whole explanation." }
+    }]})
+    .to_string();
+    let tweets = parse_x_search_tweets(&body).unwrap();
+    assert_eq!(tweets[0].text(), "Thread part with the whole explanation.");
+}

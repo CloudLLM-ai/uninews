@@ -1,3 +1,11 @@
+ 0.48.7 NOV/13/2026
+  - fix(x): long X posts (over 280 characters) were scraped cut at ~280
+    characters plus a "show more" t.co link: the X API v2 only returns the
+    full text in `note_tweet`, which was never requested. Tweet lookups and
+    conversation searches now request `note_tweet`, and the full text and
+    its URL entities replace the truncated ones. New `XTweet::text()`.
+  - deps: update cloudllm from 0.15 to 0.16.1.
+
  0.48.6 OCT/29/2026
   - security: update rustls from 0.23.43 to 0.23.45 in Cargo.lock
     to address GHSA-2mjx-qc3c-rqvc.

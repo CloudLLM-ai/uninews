@@ -33,7 +33,14 @@ const X_WEB_BEARER_TOKEN: &str =
 const X_WEB_TWEET_RESULT_BY_REST_ID_QUERY_ID: &str = "zy39CwTyYhU-_0LP7dljjg";
 
 /// A single tweet returned by the Twitter/X API v2.
+///
+/// Long posts ("note tweets", over 280 characters) come back from the API
+/// with `text` cut at ~280 characters plus a `t.co` "show more" link; the
+/// full text and its URL entities are only in `note_tweet`, and only when
+/// `tweet.fields` asks for `note_tweet`. Deserialization swaps them in, so
+/// every caller sees the whole post.
 #[derive(Deserialize, Debug)]
+#[serde(from = "XTweetWire")]
 pub struct XTweet {
     pub(crate) id: String,
     pub(crate) text: String,
@@ -42,6 +49,64 @@ pub struct XTweet {
     pub(crate) conversation_id: Option<String>,
     pub(crate) article: Option<XArticleMeta>,
     pub(crate) entities: Option<XEntities>,
+}
+
+/// `tweet.fields` every tweet lookup/search requests. `note_tweet` carries
+/// the full text of long posts (see [`XTweet`]).
+pub(crate) const X_TWEET_FIELDS: &str =
+    "created_at,author_id,conversation_id,text,entities,note_tweet";
+
+/// The full text of a long post, as the API sends it.
+#[derive(Deserialize, Debug)]
+struct XNoteTweet {
+    text: Option<String>,
+    entities: Option<XEntities>,
+}
+
+/// Wire shape of [`XTweet`], before the `note_tweet` text is swapped in.
+#[derive(Deserialize, Debug)]
+struct XTweetWire {
+    id: String,
+    text: String,
+    created_at: Option<String>,
+    author_id: Option<String>,
+    conversation_id: Option<String>,
+    article: Option<XArticleMeta>,
+    entities: Option<XEntities>,
+    note_tweet: Option<XNoteTweet>,
+}
+
+impl XTweet {
+    /// The post's text: the full text for long posts (see [`XTweet`]).
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+}
+
+impl From<XTweetWire> for XTweet {
+    fn from(wire: XTweetWire) -> Self {
+        let mut text = wire.text;
+        let mut entities = wire.entities;
+        if let Some(note) = wire.note_tweet {
+            if let Some(full) = note.text.filter(|full| !full.trim().is_empty()) {
+                text = full;
+                // The note's entities index the full text; the truncated
+                // text's entities include the "show more" t.co link.
+                if note.entities.is_some() {
+                    entities = note.entities;
+                }
+            }
+        }
+        XTweet {
+            id: wire.id,
+            text,
+            created_at: wire.created_at,
+            author_id: wire.author_id,
+            conversation_id: wire.conversation_id,
+            article: wire.article,
+            entities,
+        }
+    }
 }
 
 /// Article metadata embedded in an X API v2 tweet payload.
@@ -1011,8 +1076,8 @@ pub(crate) async fn scrape_x_url(
 
     // ── 4. Fetch the root tweet ───────────────────────────────────────────────
     let root_tweet_url = format!(
-        "https://api.x.com/2/tweets/{}?tweet.fields=created_at,author_id,conversation_id,text,entities,article&expansions=author_id&user.fields=name,username,profile_image_url",
-        tweet_id
+        "https://api.x.com/2/tweets/{}?tweet.fields={},article&expansions=author_id&user.fields=name,username,profile_image_url",
+        tweet_id, X_TWEET_FIELDS
     );
     emit_event(ScrapeEvent::FetchStarted {
         url: root_tweet_url.clone(),
@@ -1157,8 +1222,8 @@ pub(crate) async fn scrape_x_url(
     // FetchFailed event (I6): previously 401/429/network errors and X error
     // JSON all silently degraded the thread to the root tweet.
     let search_url = format!(
-        "https://api.x.com/2/tweets/search/recent?query=conversation_id%3A{}&tweet.fields=created_at,author_id,text,entities&max_results=100",
-        conversation_id
+        "https://api.x.com/2/tweets/search/recent?query=conversation_id%3A{}&tweet.fields={}&max_results=100",
+        conversation_id, X_TWEET_FIELDS
     );
     emit_event(ScrapeEvent::FetchStarted {
         url: search_url.clone(),
